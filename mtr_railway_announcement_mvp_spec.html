@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CC:Tweaked 鉄道放送システム MVP仕様書</title>
+<style>
+  :root{
+    --bg:#0f1115;
+    --panel:#171a21;
+    --panel2:#1d222b;
+    --text:#e8edf2;
+    --muted:#aab4c0;
+    --line:#303846;
+    --accent:#8ab4f8;
+    --good:#8bd49c;
+    --warn:#e7c66a;
+    --code:#0b0d11;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP","Yu Gothic UI","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    line-height:1.75;
+  }
+  main{max-width:1100px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:2rem;margin:0 0 8px}
+  h2{margin-top:42px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{margin-top:28px}
+  p{margin:10px 0}
+  .lead{color:var(--muted);font-size:1.05rem}
+  .meta{
+    display:flex;gap:12px;flex-wrap:wrap;margin:18px 0 26px
+  }
+  .tag{
+    padding:4px 10px;border:1px solid var(--line);border-radius:999px;
+    color:var(--muted);background:var(--panel)
+  }
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:18px 20px;margin:16px 0
+  }
+  .good{border-left:4px solid var(--good)}
+  .warn{border-left:4px solid var(--warn)}
+  code{
+    background:var(--code);padding:.15em .4em;border-radius:5px
+  }
+  pre{
+    overflow:auto;background:var(--code);border:1px solid var(--line);
+    border-radius:10px;padding:16px;line-height:1.5
+  }
+  pre code{padding:0}
+  table{
+    width:100%;border-collapse:collapse;margin:16px 0;background:var(--panel)
+  }
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel2)}
+  ul{padding-left:1.5rem}
+  .small{font-size:.92rem;color:var(--muted)}
+  .status{
+    font-weight:700;color:var(--good)
+  }
+  .pending{
+    font-weight:700;color:var(--warn)
+  }
+  a{color:var(--accent)}
+  @media print{
+    body{background:white;color:black}
+    .card,table,pre{background:white;color:black}
+    .tag{background:white}
+    :root{--line:#aaa;--muted:#444;--code:#f5f5f5}
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>CC:Tweaked 鉄道放送システム MVP仕様書</h1>
+<p class="lead">MTRを主対象としつつ、Create系鉄道環境にも展開できる、ProjectRed入力ベースの自動放送システム。</p>
+
+<div class="meta">
+  <span class="tag">CC:Tweaked</span>
+  <span class="tag">ProjectRed Bundled Wire</span>
+  <span class="tag">MTR</span>
+  <span class="tag">Create対応を想定</span>
+  <span class="tag">DFPWM</span>
+</div>
+
+<div class="card good">
+  <strong>基本方針</strong>
+  <p>列車状態の遷移トリガーはProjectRedの1chパルス入力を正とし、現在状態はCC内部で保持する。鉄道MOD固有Adapterは放送セグメント合成用のメタデータ取得にのみ使用する。Adapterが利用不能でも簡易放送は継続する。</p>
+</div>
+
+<h2>1. スコープ</h2>
+
+<table>
+<thead><tr><th>項目</th><th>方針</th></tr></thead>
+<tbody>
+<tr><td>基本構成</td><td>1線につき1コンピュータ</td></tr>
+<tr><td>列車状態入力</td><td>ProjectRed Bundled Wire 1ch（NEXTパルス）</td></tr>
+<tr><td>放送</td><td>接近放送、発車メロディ、任意のドア閉め放送</td></tr>
+<tr><td>鉄道MOD固有情報</td><td>Adapter経由で任意取得。放送内容の補完にのみ使用</td></tr>
+<tr><td>Speaker</td><td>ローカル接続をMVP対象。複数Speakerに対応</td></tr>
+<tr><td>共有Speaker</td><td>別プロジェクト。FCFS仲介サーバ方式を想定</td></tr>
+<tr><td>永続データ</td><td>当面はJSON等。MessagePackは将来候補</td></tr>
+</tbody>
+</table>
+
+<h2>2. システム全体構成</h2>
+
+<pre><code>ProjectRed Bundled Wire
+   NEXT pulse (1ch)
+        │
+        ▼
+   io/projectred
+        │
+        ▼
+ Track State Manager
+        │
+        │ APPROACH / PLATFORM / DEPARTURE
+        ▼
+ Announcement Event
+        │
+        ▼
+ Announcement Queue
+        │
+        ▼
+ Announcement Composer  ◀──── Metadata Cache
+        │                         ▲
+        │                         │
+        │                  Metadata Adapter
+        │                  ├─ MTR
+        │                  ├─ Create
+        │                  └─ None
+        ▼
+   Segment Resolver
+        │
+        ▼
+    Audio Player
+        │
+        ▼
+    io/speaker
+        │
+        ▼
+   Speaker × N
+</code></pre>
+
+<p>CoreはMTRやCreateのAPI仕様を知らない。鉄道MOD依存コードはAdapterへ隔離する。</p>
+
+<h2>3. ProjectRed入力仕様</h2>
+
+<h3>3.1 NEXTパルス入力</h3>
+
+<p>1線につきProjectRed入力は<strong>1chのみ</strong>を必須とする。入力は現在状態そのものではなく、状態を1段進めるための立ち上がりパルスとして扱う。</p>
+
+<pre><code>ProjectRed 1ch
+    ↓ pulse
+CC内部 state を1段進める
+</code></pre>
+
+<table>
+<thead><tr><th>現在状態</th><th>NEXTパルス後</th><th>主な処理</th></tr></thead>
+<tbody>
+<tr><td>IDLE</td><td>APPROACH</td><td>接近イベント生成</td></tr>
+<tr><td>APPROACH</td><td>PLATFORM</td><td>ホーム在線イベント生成</td></tr>
+<tr><td>PLATFORM</td><td>DEPARTURE</td><td>発車イベント生成</td></tr>
+<tr><td>DEPARTURE</td><td>IDLE</td><td>次列車待機状態へ復帰</td></tr>
+</tbody>
+</table>
+
+<pre><code>IDLE
+  ↓ NEXT
+APPROACH
+  ↓ NEXT
+PLATFORM
+  ↓ NEXT
+DEPARTURE
+  ↓ NEXT または処理完了後の自動復帰
+IDLE
+</code></pre>
+
+<p>MVPでは、設備側から複数bitで状態値を送信せず、CC側が状態を保持する。これによりGray codeや複数bit同時立ち上がりの問題を避け、配線を最小化する。</p>
+
+<div class="card warn">
+<strong>注意:</strong>
+<p>NEXTパルスを取りこぼすとCC内部状態が1段ずれる可能性がある。MVPでは起動時をIDLEとし、DEPARTURE後の自動IDLE復帰、タイムアウトや手動リセット等の復旧手段を後から追加できる設計にする。</p>
+</div>
+
+<h3>3.2 種別bit</h3>
+
+<p><strong>使用しない。</strong> 種別・行先はMetadata Adapterから取得できた場合のみ詳細放送へ追加する。Adapterが利用不能な場合は「列車が」を用いた簡易放送へフォールバックする。</p>
+
+<h2>4. Track State Manager</h2>
+
+<p>ProjectRedのNEXTパルスをCoreへ渡し、CC内部で保持している状態を1段進めて状態遷移イベントへ変換する。</p>
+
+<pre><code>{
+    track = 1,
+    state = "APPROACH",
+    event = "approach"
+}
+</code></pre>
+
+<p>責務:</p>
+<ul>
+  <li>NEXTパルスの立ち上がり検出</li>
+  <li>CC内部stateの更新</li>
+  <li>接近・在線・発車イベントの生成</li>
+  <li>異常・タイムアウト等のログ記録</li>
+</ul>
+
+<h2>5. Metadata Adapter</h2>
+
+<div class="card good">
+<strong>Adapterの責務は「セグメント合成に必要な付加情報の供給」のみ。</strong>
+</div>
+
+<p>Adapterは以下を行わない。</p>
+<ul>
+  <li>接近・発車判定</li>
+  <li>ProjectRed入力</li>
+  <li>Speaker制御</li>
+  <li>放送Queue操作</li>
+</ul>
+
+<p>共通出力例:</p>
+
+<pre><code>{
+    class = "rapid",
+    destination = "central",
+    route = "R01",
+    source = "mtr"
+}
+</code></pre>
+
+<p>取得不能時は <code>nil</code> または空metadataを返す。Composer側はそれを理由に放送自体を止めない。</p>
+
+<h3>5.1 MTR Adapter</h3>
+
+<p>MTR APIから種別・行先・路線等を取得し、共通metadata形式へ変換する。HTTP/APIが利用不能でもCoreは継続動作する。</p>
+
+<h3>5.2 Create Adapter</h3>
+
+<p>Create Train Station Peripheral等から取得可能な情報を共通metadata形式へ変換する。列車状態の判定には使用しない。</p>
+
+<h3>5.3 None Adapter</h3>
+
+<p>常にmetadataなしを返す。ProjectRed + DFPWMだけで完全動作可能にする。</p>
+
+<h2>6. Metadata Cache</h2>
+
+<p>Adapter取得結果はRAM上にキャッシュ可能。運行情報キャッシュは原則として永続化しない。</p>
+
+<pre><code>cache = {
+    class = "rapid",
+    destination = "central",
+    route = "R01",
+    fetchedAt = os.epoch("utc")
+}
+</code></pre>
+
+<p>用途はAPI一時停止時のgraceful degradation。古い情報による誤放送を避けるためTTLを設定する。</p>
+
+<pre><code>LIVE metadata
+    ↓
+TTL内のcache
+    ↓
+metadataなし
+    ↓
+簡易放送
+</code></pre>
+
+<p>CC再起動時はキャッシュを空にし、再取得する。</p>
+
+<h2>7. Announcement Queue</h2>
+
+<p>センサーイベントから直接再生せず、意味的な放送要求をQueueへ積む。</p>
+
+<pre><code>{
+    type = "approach",
+    track = 1,
+    createdAt = ...,
+    expiresAt = ...
+}
+</code></pre>
+
+<p>MVPではローカルQueueを使用し、基本はFCFSでよい。</p>
+
+<p>最低限の機能:</p>
+<ul>
+  <li>FIFO / FCFS</li>
+  <li>重複除去</li>
+  <li>期限切れ放送の破棄</li>
+  <li>再生中は次の放送を開始しない</li>
+</ul>
+
+<h2>8. Announcement Composer</h2>
+
+<p>Announcement Eventとmetadataから論理Segment Listを生成する。</p>
+
+<h3>8.1 接近放送</h3>
+
+<pre><code>[接近メロディ]
+  ※optional
+
+「まもなく、」
+
+[n番線に、]
+  ※対象ファイルがない場合はskip
+
+IF 種別・行先metadataあり:
+    [種別]
+    [行先]
+    ※「列車が」は再生しない
+ELSE:
+    「列車が、」
+
+「まいります。危険ですので、
+黄色い点字ブロックまで、お下がりください。」
+
+[到着メロディ]
+  ※optional、デフォルトOFF
+</code></pre>
+
+<p>詳細放送例:</p>
+
+<pre><code>♪ 接近メロディ
+まもなく、
+2番線に、
+快速、
+中央行きが、
+まいります。危険ですので……
+</code></pre>
+
+<p>簡易放送例:</p>
+
+<pre><code>♪ 接近メロディ
+まもなく、
+2番線に、
+列車が、
+まいります。危険ですので……
+</code></pre>
+
+<p>Composerテンプレート例:</p>
+
+<pre><code>approach = {
+    { segment = "approach_melody", optional = true },
+    "soon",
+    { segment = "track", optional = true },
+    { segment = "class", optional = true },
+    { segment = "destination", optional = true },
+    { segment = "train", fallbackOnly = true },
+    "approach_warning",
+    { segment = "arrival_melody", optional = true, defaultEnabled = false }
+}
+</code></pre>
+
+<h3>8.2 発車放送</h3>
+
+<pre><code>[発車メロディ]
+
+[「ドアが閉まります。ご注意ください。」]
+  ※デフォルトOFF
+</code></pre>
+
+<p>放送内容はハードコードせず、テンプレート + 条件付きセグメント方式とする。</p>
+
+<pre><code>approach = {
+    "soon",
+    { segment = "track", optional = true },
+    { segment = "class", optional = true },
+    { segment = "destination", optional = true },
+    "train",
+    "approach_warning"
+}
+</code></pre>
+
+<h2>9. Segment Resolver</h2>
+
+<p>論理セグメントを実際のDFPWMファイルへ解決する。</p>
+
+<pre><code>{ type = "track", value = 1 }
+    ↓
+/assets/track/1.dfpwm
+</code></pre>
+
+<p>ファイルが存在しないoptional segmentはskipする。</p>
+
+<h2>10. Audio Player / Speaker制御</h2>
+
+<p>複数Speaker接続時のズレ対策として、Speakerごとに独立した再生ループを持たせない。</p>
+
+<pre><code>Segment N
+   ↓
+同一chunkを全Speakerへ
+   ↓
+Barrier
+   ↓
+Segment N+1
+</code></pre>
+
+<p>セグメント境界を同期ポイントとして利用し、ズレの累積を抑える。</p>
+
+<div class="card warn">
+<strong>制約:</strong>
+<p>CC:TweakedのSpeaker再生経路にはサーバtick・バッファ・クライアント側再生が介在するため、Luaだけでsample単位の完全同期は保証できない。MVPでは「ズレの蓄積を抑制する」ことを目標とする。</p>
+</div>
+
+<h2>11. ファイル / モジュール構成案</h2>
+
+<pre><code>/
+├─ startup.lua
+├─ config.lua
+│
+├─ core/
+│  ├─ track_state.lua
+│  ├─ announcement_queue.lua
+│  ├─ composer.lua
+│  └─ scheduler.lua
+│
+├─ io/
+│  ├─ projectred.lua
+│  └─ speaker.lua
+│
+├─ audio/
+│  ├─ player.lua
+│  └─ segment.lua
+│
+├─ adapter/
+│  ├─ none.lua
+│  ├─ mtr.lua
+│  └─ create.lua
+│
+├─ metadata/
+│  └─ cache.lua
+│
+├─ data/
+│  └─ loader.lua
+│
+└─ assets/
+   ├─ approach/
+   ├─ departure/
+   ├─ track/
+   ├─ class/
+   ├─ destination/
+   └─ melody/
+</code></pre>
+
+<h2>12. 設定方針</h2>
+
+<p>1線1コンピュータなので、番線はconfigで指定する。ProjectRed入力はNEXTパルス用1chのみを設定する。</p>
+
+<pre><code>return {
+    trackNumber = 1,
+
+    projectred = {
+        next = colors.red
+    },
+
+    adapter = "mtr",
+
+    announcement = {
+        approachMelody = true,
+        arrivalMelody = false, -- default
+        doorsClosing = false   -- default
+    }
+}
+</code></pre>
+
+<h2>13. データフォーマット</h2>
+
+<table>
+<thead><tr><th>用途</th><th>MVP</th><th>将来</th></tr></thead>
+<tbody>
+<tr><td>Luaコード</td><td>.lua</td><td>継続</td></tr>
+<tr><td>設定・マスター</td><td>JSON / Lua table</td><td>MessagePackを検討</td></tr>
+<tr><td>音声</td><td>DFPWM</td><td>継続</td></tr>
+<tr><td>運行metadata cache</td><td>RAM上のLua table</td><td>原則永続化しない</td></tr>
+</tbody>
+</table>
+
+<p>MessagePackはDBではなく、JSON相当の構造化データをコンパクトなバイナリとして保存する候補。MVPでは実装コストを増やさず、必要になった時点で導入する。</p>
+
+<h2>14. 共有Speaker構成</h2>
+
+<p><span class="pending">別プロジェクト扱い。</span></p>
+
+<p>1線1コンピュータのまま、Speakerだけを共有する駅では、専用Speaker Controllerへ放送要求を送る。</p>
+
+<pre><code>1番線 CC ─┐
+           ├── Announcement Request ──→ Speaker Controller
+2番線 CC ─┘                            │
+                                       ├─ FCFS Queue
+                                       ├─ Composer
+                                       └─ Player
+                                            ↓
+                                       Shared Speakers
+</code></pre>
+
+<p>この別プロジェクトでは、Speakerを複数CCから直接操作せず、所有者を1台に固定する。</p>
+
+<p>メイン放送システム側では、将来的にLocal Output / Remote Outputを差し替えられる境界だけ残す。</p>
+
+
+<h2>15. 旧コードからの再利用方針</h2>
+
+<p>既存の <code>startup.lua</code> / <code>config.lua</code> は全廃せず、責務を分離した上で一部を再利用する。旧コードの「ProjectRed入力 → 即時再生」という密結合部分は新アーキテクチャへ置き換える。</p>
+
+<table>
+<thead>
+<tr><th>旧実装</th><th>再利用度</th><th>新しい配置</th><th>方針</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><code>connect_speaker()</code></td>
+<td>高</td>
+<td><code>io/speaker.lua</code></td>
+<td><code>peripheral.find("speaker")</code> による複数Speaker検出を再利用する。Speaker未接続時のbusy loopは修正する。</td>
+</tr>
+<tr>
+<td><code>play_audio()</code> のファイル検証</td>
+<td>高</td>
+<td><code>audio/player.lua</code></td>
+<td><code>fs.exists()</code> / <code>fs.isDir()</code> による音声ファイル検証を再利用する。</td>
+</tr>
+<tr>
+<td><code>play_audio()</code> のDFPWM読込・decode</td>
+<td>高</td>
+<td><code>audio/player.lua</code></td>
+<td>16 KiB単位の読込とDFPWM decoder利用は再利用候補とする。</td>
+</tr>
+<tr>
+<td><code>play_audio()</code> のSpeaker送信</td>
+<td>低</td>
+<td><code>io/speaker.lua</code></td>
+<td>Speakerを1台ずつ順番に処理する旧方式は廃止し、複数Speakerを同一chunk単位で管理する方式へ書き直す。</td>
+</tr>
+<tr>
+<td><code>play_voice_files()</code></td>
+<td>中〜高</td>
+<td><code>audio/segment.lua</code> またはutility</td>
+<td>番号付きDFPWMファイルの探索・ソート処理は汎用補助関数として再利用可能。ただし新Composerでは意味ベースのsegment指定を主方式とする。</td>
+</tr>
+<tr>
+<td><code>audio_event()</code></td>
+<td>低</td>
+<td>廃止 / Queue・Schedulerへ統合</td>
+<td>関数内部でtimer eventを待機して直接再生する構造は廃止し、Announcement Queue経由へ置き換える。</td>
+</tr>
+<tr>
+<td><code>now_time()</code></td>
+<td>高</td>
+<td><code>util/log.lua</code></td>
+<td>ログ時刻表示用utilityとしてそのまま再利用可能。</td>
+</tr>
+<tr>
+<td>Bundled Wire読取処理</td>
+<td>高</td>
+<td><code>io/projectred.lua</code></td>
+<td><code>rs.getBundledInput()</code> / <code>colors.test()</code> の考え方を再利用し、入力はNEXTパルス1chへ簡素化する。</td>
+</tr>
+<tr>
+<td>旧main loop</td>
+<td>低</td>
+<td><code>core/scheduler.lua</code> 等へ再構築</td>
+<td>入力判定と音声再生が密結合しているため、Track State / Queue / Composer / Playerへ分離して作り直す。</td>
+</tr>
+<tr>
+<td>旧<code>config.lua</code></td>
+<td>中</td>
+<td>新<code>config.lua</code></td>
+<td>音声パス、Redstone side等の設定分離思想は再利用し、新構成に合わせてネストした設定へ整理する。</td>
+</tr>
+</tbody>
+</table>
+
+<h3>15.1 再利用時の基本原則</h3>
+
+<pre><code>旧コード
+ProjectRed入力
+    ↓
+即時判定
+    ↓
+play_audio()
+
+新コード
+ProjectRed NEXT pulse
+    ↓
+Track State Manager
+    ↓
+Announcement Queue
+    ↓
+Composer
+    ↓
+Segment Resolver
+    ↓
+Audio Player
+    ↓
+Speaker I/O
+</code></pre>
+
+<p>旧コードからは「Peripheral列挙」「音声ファイル検証」「DFPWM decode」「番号付きファイル探索」「ログ時刻表示」を主に再利用する。状態管理、Queue、Composer、複数Speaker同期、main loopは新設計へ置き換える。</p>
+
+<h3>15.2 MVP実装時の移植優先順位</h3>
+
+<ol>
+<li><code>connect_speaker()</code> を <code>io/speaker.lua</code> へ移植。</li>
+<li><code>play_audio()</code> からファイル検証・DFPWM decode部分のみを <code>audio/player.lua</code> へ移植。</li>
+<li>ProjectRed読取処理を <code>io/projectred.lua</code> へ移植し、NEXTパルス1ch仕様へ変更。</li>
+<li><code>now_time()</code> をログutilityへ移植。</li>
+<li><code>play_voice_files()</code> は必要に応じてsegment探索utilityとして残す。</li>
+<li>旧main loopと<code>audio_event()</code>は流用せず、新しいQueue/Schedulerへ置き換える。</li>
+</ol>
+
+<h2>16. MVP完成条件</h2>
+
+<ol>
+  <li>ProjectRed 1chのNEXTパルスから状態遷移を進められる。</li>
+  <li>CC内部でIDLE / APPROACH / PLATFORM / DEPARTUREの状態を保持できる。</li>
+  <li>接近メロディ、接近放送、任意の到着メロディ、発車放送をQueue経由で再生できる。</li>
+  <li>optional segmentを条件付きでskipできる。</li>
+  <li>Adapterなしでも簡易放送が成立する。</li>
+  <li>MTR / Create Adapterから取得したmetadataを放送セグメントへ反映できる。</li>
+  <li>Adapter/API障害時に簡易放送へフォールバックできる。</li>
+  <li>複数Speakerへ同一音声を再生し、セグメント境界で同期を取り直せる。</li>
+  <li>到着メロディとドア閉め放送をconfigでON/OFFできる。</li>
+</ol>
+
+<h2>17. 設計原則</h2>
+
+<div class="card">
+<pre><code>ProjectRed = 状態をいつ進めるか
+Adapter    = 何を追加で放送できるか
+Composer   = どのセグメントを並べるか
+Queue      = いつ再生するか
+Player     = どう鳴らすか
+Speaker    = 実際の出力先
+</code></pre>
+</div>
+
+<p>最重要原則は、<strong>放送Coreが鉄道MOD固有APIへ依存しないこと</strong>。MTR、Create、Adapterなしの各構成を同一Coreで扱えることを目標とする。</p>
+
+<p class="small">この文書は現時点のMVP仕様を整理したもので、状態同期の復旧方式、MessagePack採用、共有Speaker通信方式などは将来拡張として扱う。種別bitは使用しない。</p>
+
+</main>
+</body>
+</html>
