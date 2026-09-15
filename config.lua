@@ -1,17 +1,51 @@
-local config = {}
+return {
+    trackNumber = 1,
 
-config.DEPART_FILE_PATH = "audio/constant_moderato_V2.dfpwm"
-config.ARRIVAL_FILE_PATH = "audio/com_chime_arrival-melody.dfpwm"
-config.DEPART_VOICE_PATH = ""
-config.ARRIVAL_VOICE_PATH = "audio/track-5.dfpwm"
-config.VOICE_DIR_PATH = "audio"
+    redstone = {
+        side = "top",
+    },
 
-config.TIMEOUT_TIMING = 0
+    state = {
+        -- The third NEXT pulse enters DEPARTURE and then returns to IDLE.
+        autoResetAfterDeparture = true,
+    },
 
-config.RS_SIDE = "top"
+    queue = {
+        approachTtlMs = 30000,
+        departureTtlMs = 30000,
+    },
 
-config.ARRIVAL_SIGNAL_COLOR = colors.lime
-config.DEPART_SIGNAL_COLOR = colors.orange
+    speaker = {
+        volume = 3,
+        reconnectDelay = 1,
+    },
 
+    adapter = {
+        module = "none",
+        cacheTtlMs = 30000,
+    },
 
-return config
+    announcement = {
+        approach = {
+            melodyEnabled = true,
+            melody = "audio/approach/melody.dfpwm",
+            soon = "audio/approach/soon.dfpwm",
+            train = "audio/approach/train.dfpwm",
+            warning = "audio/approach/warning.dfpwm",
+
+            trackDir = "audio/track",
+            classDir = "audio/class",
+            destinationDir = "audio/destination",
+
+            arrivalMelodyEnabled = false,
+            arrivalMelody = "audio/arrival/melody.dfpwm",
+        },
+
+        departure = {
+            melody = "audio/departure/melody.dfpwm",
+
+            doorsClosingEnabled = false,
+            doorsClosing = "audio/departure/doors_closing.dfpwm",
+        },
+    },
+}
