@@ -20,6 +20,7 @@ local transitions = {
     },
 }
 
+-- function: Create a track state machine starting from IDLE.
 function TrackState.new(options)
     options = options or {}
 
@@ -29,14 +30,17 @@ function TrackState.new(options)
     }, TrackState)
 end
 
+-- function: Return the current track state.
 function TrackState:get()
     return self.state
 end
 
+-- function: Reset the track state to IDLE.
 function TrackState:reset()
     self.state = "IDLE"
 end
 
+-- function: Advance the track state by one transition.
 function TrackState:advance()
     local previous = self.state
     local transition = assert(transitions[previous], "unknown track state: " .. tostring(previous))

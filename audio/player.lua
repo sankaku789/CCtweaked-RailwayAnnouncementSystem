@@ -5,6 +5,7 @@ Player.__index = Player
 
 local CHUNK_SIZE = 16 * 1024
 
+-- function: Create an audio player for the connected speakers.
 function Player.new(speakers, logger)
     return setmetatable({
         speakers = speakers,
@@ -12,6 +13,7 @@ function Player.new(speakers, logger)
     }, Player)
 end
 
+-- function: Check whether an audio path points to a playable file.
 function Player:_validFile(path)
     return type(path) == "string"
         and path ~= ""
@@ -19,6 +21,7 @@ function Player:_validFile(path)
         and not fs.isDir(path)
 end
 
+-- function: Decode and play one DFPWM audio file.
 function Player:playFile(path)
     if not self:_validFile(path) then
         if self.logger then
@@ -40,6 +43,7 @@ function Player:playFile(path)
     return true
 end
 
+-- function: Play an ordered list of audio segment files.
 function Player:playSegments(segments)
     for _, path in ipairs(segments) do
         self:playFile(path)

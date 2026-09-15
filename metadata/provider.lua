@@ -1,6 +1,7 @@
 local Provider = {}
 Provider.__index = Provider
 
+-- function: Create a metadata provider backed by an adapter and RAM cache.
 function Provider.new(adapter, cache, logger)
     return setmetatable({
         adapter = adapter,
@@ -9,6 +10,7 @@ function Provider.new(adapter, cache, logger)
     }, Provider)
 end
 
+-- function: Return cached metadata or fetch fresh metadata from the adapter.
 function Provider:get(context)
     local key = tostring(context.track or "default")
     local cached = self.cache:get(key)

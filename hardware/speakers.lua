@@ -1,6 +1,7 @@
 local Speakers = {}
 Speakers.__index = Speakers
 
+-- function: Discover all currently attached speaker peripherals.
 local function discover()
     local wrapped = { peripheral.find("speaker") }
     local result = {}
@@ -15,6 +16,7 @@ local function discover()
     return result
 end
 
+-- function: Wait for and connect to one or more speaker peripherals.
 function Speakers.connect(options, logger)
     options = options or {}
     local reconnectDelay = options.reconnectDelay or 1
@@ -40,12 +42,14 @@ function Speakers.connect(options, logger)
     end
 end
 
+-- function: Stop audio playback on every connected speaker.
 function Speakers:stop()
     for _, device in ipairs(self.devices) do
         device.peripheral.stop()
     end
 end
 
+-- function: Submit the same decoded audio chunk to every connected speaker.
 function Speakers:playChunk(audio)
     -- The player calls this only after the previous chunk reached the barrier,
     -- so every speaker should be ready. If a speaker unexpectedly rejects the
@@ -75,6 +79,7 @@ function Speakers:playChunk(audio)
     error("Failed to enqueue audio chunk to all speakers after resync attempts")
 end
 
+-- function: Wait until every connected speaker has emptied its current audio buffer.
 function Speakers:waitUntilAllReady()
     local pending = {}
     local count = 0

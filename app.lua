@@ -14,6 +14,7 @@ local Scheduler = require("core.scheduler")
 
 local app = {}
 
+-- function: Load the configured metadata adapter with a safe fallback.
 local function loadAdapter()
     local name = config.adapter and config.adapter.module or "none"
     local moduleName = "adapter." .. tostring(name)
@@ -34,6 +35,7 @@ local function loadAdapter()
     return module
 end
 
+-- function: Start and run the railway announcement application.
 function app.run()
     log.info("Railway Announcement System starting.")
 

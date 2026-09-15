@@ -3,14 +3,17 @@ Queue.__index = Queue
 
 local EVENT_NAME = "railway_announcement_queued"
 
+-- function: Return the current UTC epoch time in milliseconds.
 local function now()
     return os.epoch("utc")
 end
 
+-- function: Build the deduplication key for an announcement request.
 local function requestKey(request)
     return ("%s:%s"):format(tostring(request.type), tostring(request.track))
 end
 
+-- function: Create an empty first-in-first-out announcement queue.
 function Queue.new()
     return setmetatable({
         items = {},
@@ -18,6 +21,7 @@ function Queue.new()
     }, Queue)
 end
 
+-- function: Add an announcement request unless an equivalent request is already queued.
 function Queue:enqueue(request)
     assert(type(request) == "table", "request must be a table")
     assert(request.type ~= nil, "request.type is required")
@@ -36,6 +40,7 @@ function Queue:enqueue(request)
     return true
 end
 
+-- function: Remove and return the oldest queued request without expiry checks.
 function Queue:_popRaw()
     if #self.items == 0 then
         return nil
@@ -46,6 +51,7 @@ function Queue:_popRaw()
     return request
 end
 
+-- function: Return the oldest non-expired announcement request.
 function Queue:pop()
     while true do
         local request = self:_popRaw()
@@ -59,6 +65,7 @@ function Queue:pop()
     end
 end
 
+-- function: Wait until a non-expired announcement request is available.
 function Queue:waitPop()
     while true do
         local request = self:pop()
@@ -70,6 +77,7 @@ function Queue:waitPop()
     end
 end
 
+-- function: Return the number of queued announcement requests.
 function Queue:size()
     return #self.items
 end

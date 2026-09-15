@@ -1,14 +1,17 @@
 local Scheduler = {}
 Scheduler.__index = Scheduler
 
+-- function: Return the current UTC epoch time in milliseconds.
 local function now()
     return os.epoch("utc")
 end
 
+-- function: Create a scheduler from the application components.
 function Scheduler.new(options)
     return setmetatable(options, Scheduler)
 end
 
+-- function: Queue an announcement request with the configured expiry time.
 function Scheduler:_enqueue(typeName)
     local ttl
 
@@ -34,6 +37,7 @@ function Scheduler:_enqueue(typeName)
     end
 end
 
+-- function: Monitor NEXT pulses and convert state transitions into announcement requests.
 function Scheduler:monitorInput()
     while true do
         self.input:waitForPulse()
@@ -55,6 +59,7 @@ function Scheduler:monitorInput()
     end
 end
 
+-- function: Process queued announcements sequentially.
 function Scheduler:processQueue()
     while true do
         local request = self.queue:waitPop()
@@ -78,11 +83,14 @@ function Scheduler:processQueue()
     end
 end
 
+-- function: Run the input monitor and announcement processor in parallel.
 function Scheduler:run()
     parallel.waitForAll(
+        -- function: Run the redstone input monitoring task.
         function()
             self:monitorInput()
         end,
+        -- function: Run the announcement queue processing task.
         function()
             self:processQueue()
         end

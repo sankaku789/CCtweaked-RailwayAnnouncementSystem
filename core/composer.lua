@@ -1,12 +1,14 @@
 local Composer = {}
 Composer.__index = Composer
 
+-- function: Append a segment path when it is available.
 local function add(list, path)
     if path then
         list[#list + 1] = path
     end
 end
 
+-- function: Create an announcement composer.
 function Composer.new(config, resolver)
     return setmetatable({
         config = config,
@@ -14,6 +16,7 @@ function Composer.new(config, resolver)
     }, Composer)
 end
 
+-- function: Compose the ordered segments for an approach announcement.
 function Composer:_composeApproach(request, metadata)
     local cfg = self.config.announcement.approach
     local segments = {}
@@ -53,6 +56,7 @@ function Composer:_composeApproach(request, metadata)
     return segments
 end
 
+-- function: Compose the ordered segments for a departure announcement.
 function Composer:_composeDeparture()
     local cfg = self.config.announcement.departure
     local segments = {}
@@ -66,6 +70,7 @@ function Composer:_composeDeparture()
     return segments
 end
 
+-- function: Compose audio segments for an announcement request.
 function Composer:compose(request, metadata)
     if request.type == "approach" then
         return self:_composeApproach(request, metadata)

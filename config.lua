@@ -23,6 +23,12 @@ return {
     adapter = {
         module = "none",
         cacheTtlMs = 30000,
+
+        mtr = {
+            baseUrl = "http://localhost:8888",
+            dimension = 0,
+            platformIdHex = "",
+        },
     },
 
     announcement = {

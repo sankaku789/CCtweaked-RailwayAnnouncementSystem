@@ -83,7 +83,8 @@ audio/
 - `redstone.side`: NEXTパルスを受ける通常Redstone入力面
 - `state.autoResetAfterDeparture`: DEPARTURE後に自動でIDLEへ戻す
 - `speaker.volume`: Speaker音量
-- `adapter.module`: Metadata Adapter名。MVP既定は`none`
+- `adapter.module`: Metadata Adapter名。既定は`none`
+- `adapter.cacheTtlMs`: MetadataのRAM cache TTL
 - `announcement.approach.arrivalMelodyEnabled`: 到着メロディ。既定OFF
 - `announcement.departure.doorsClosingEnabled`: ドア閉め放送。既定OFF
 
@@ -97,13 +98,72 @@ Adapterはセグメント合成に必要な情報だけを返します。
 {
     class = "rapid",
     destination = "central",
-    route = "R01",
 }
 ```
 
 Adapterが失敗・未設定の場合、接近放送は自動的に「列車が」を使う簡易放送になります。
 
-MVPには`adapter/none.lua`のみ実装しています。MTR/Create Adapterはこの共通インターフェースへ追加できます。
+### MTR Adapter
+
+`adapter/mtr.lua` はTransport Simulation CoreのSystem Map arrivals APIから、対象ホームの次列車1件を取得します。
+
+使用するMTRフィールドは以下です。
+
+```text
+routeNumber -> class
+destination -> destination
+```
+
+MTR側の名称は `日本語|English` を前提とし、`|` の右側の英語部分を音声IDへ変換します。
+大文字小文字は区別せず、英数字以外の連続文字は `_` に正規化します。
+
+```text
+快速|Rapid              -> rapid
+特急|Limited Express    -> limited_express
+中央|Central            -> central
+New Town                -> new_town
+```
+
+そのため、音声ファイルは正規化後のIDをそのままファイル名にします。
+
+```text
+audio/class/rapid.dfpwm
+audio/class/limited_express.dfpwm
+audio/destination/central.dfpwm
+audio/destination/new_town.dfpwm
+```
+
+MTR Adapterを使用する場合は、`config.lua` を設定します。
+
+```lua
+adapter = {
+    module = "mtr",
+    cacheTtlMs = 30000,
+
+    mtr = {
+        baseUrl = "http://localhost:8888",
+        dimension = 0,
+        platformIdHex = "<platform-id-hex>",
+    },
+}
+```
+
+`baseUrl` はTSCのHTTP APIアドレスです。TSC単体の既定Webserver portは`8888`ですが、
+実際のMTR環境で別ポートを使用している場合はその値へ変更してください。
+
+`platformIdHex` は対象ホームのhex IDです。
+Adapterは以下のrequest相当を `/mtr/api/map/arrivals?dimension=<n>` へ送ります。
+
+```json
+{
+  "platformIdsHex": ["<platform-id-hex>"],
+  "maxCountPerPlatform": 1,
+  "maxCountTotal": 1
+}
+```
+
+HTTP/APIエラー、列車情報なし、英語部分を正規化できない場合はmetadataを返さず、
+Coreは簡易放送へフォールバックします。
 
 ## 複数Speaker
 
@@ -112,6 +172,17 @@ MVPには`adapter/none.lua`のみ実装しています。MTR/Create Adapterは�
 
 CC:Tweaked/Minecraft側のバッファやtickによる完全同期は保証できませんが、
 Speaker間でchunk位置が累積的にずれることを抑える設計です。
+
+## コード規約
+
+各Lua関数の直前には、旧コードと同様に英語で機能を示すコメントを付けます。
+
+```lua
+-- function: Play an ordered list of audio segment files.
+function Player:playSegments(segments)
+    ...
+end
+```
 
 ## モジュール
 
@@ -140,6 +211,7 @@ metadata/
 
 adapter/
   none.lua
+  mtr.lua
 
 util/
   log.lua
