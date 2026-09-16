@@ -1,84 +1,97 @@
 local Composer = {}
 Composer.__index = Composer
 
--- function: Append a segment path when it is available.
-local function add(list, path)
-    if path then
-        list[#list + 1] = path
+-- function: Trim leading and trailing ASCII whitespace.
+local function trim(value)
+    return value:match("^%s*(.-)%s*$")
+end
+
+-- function: Append resolved segment paths to the output list.
+local function appendAll(output, paths)
+    if not paths then
+        return
+    end
+
+    for _, path in ipairs(paths) do
+        output[#output + 1] = path
     end
 end
 
--- function: Create an announcement composer.
-function Composer.new(config, resolver)
+-- function: Parse optional and fallback operators from a pattern entry.
+local function parseEntry(entry)
+    assert(type(entry) == "string", "announcement pattern entry must be a string")
+
+    local optional = entry:sub(1, 1) == "?"
+    if optional then
+        entry = entry:sub(2)
+    end
+
+    entry = trim(entry)
+    assert(entry ~= "", "announcement pattern entry cannot be empty")
+
+    local separator = entry:find("|", 1, true)
+    if not separator then
+        return {
+            optional = optional,
+            primary = entry,
+        }
+    end
+
+    local primary = trim(entry:sub(1, separator - 1))
+    local fallback = trim(entry:sub(separator + 1))
+
+    assert(primary ~= "", "fallback primary segment cannot be empty")
+    assert(fallback ~= "", "fallback segment cannot be empty")
+
+    return {
+        optional = optional,
+        primary = primary,
+        fallback = fallback,
+    }
+end
+
+-- function: Create an announcement composer from declarative patterns.
+function Composer.new(patterns, resolver)
     return setmetatable({
-        config = config,
+        patterns = patterns or {},
         resolver = resolver,
     }, Composer)
 end
 
--- function: Compose the ordered segments for an approach announcement.
-function Composer:_composeApproach(request, metadata)
-    local cfg = self.config.announcement.approach
-    local segments = {}
+-- function: Resolve one pattern entry into zero or more audio file paths.
+function Composer:_resolveEntry(entry, context)
+    local parsed = parseEntry(entry)
 
-    if cfg.melodyEnabled then
-        add(segments, self.resolver:optional(cfg.melody))
+    if parsed.fallback then
+        local primary = self.resolver:resolve(parsed.primary, context, true)
+        if primary then
+            return primary
+        end
+
+        return self.resolver:resolve(parsed.fallback, context, parsed.optional)
     end
 
-    -- Fixed speech segments are kept even when missing. The player will emit a warning.
-    add(segments, cfg.soon)
-
-    add(segments, self.resolver:fromId(cfg.trackDir, request.track))
-
-    local classPath
-    local destinationPath
-
-    if metadata then
-        classPath = self.resolver:fromId(cfg.classDir, metadata.class)
-        destinationPath = self.resolver:fromId(cfg.destinationDir, metadata.destination)
-    end
-
-    if classPath and destinationPath then
-        -- Only omit the generic "train" segment when both detailed segments can
-        -- actually be spoken. Partial metadata falls back to the simple phrase.
-        add(segments, classPath)
-        add(segments, destinationPath)
-    else
-        add(segments, cfg.train)
-    end
-
-    add(segments, cfg.warning)
-
-    if cfg.arrivalMelodyEnabled then
-        add(segments, self.resolver:optional(cfg.arrivalMelody))
-    end
-
-    return segments
-end
-
--- function: Compose the ordered segments for a departure announcement.
-function Composer:_composeDeparture()
-    local cfg = self.config.announcement.departure
-    local segments = {}
-
-    add(segments, self.resolver:optional(cfg.melody))
-
-    if cfg.doorsClosingEnabled then
-        add(segments, self.resolver:optional(cfg.doorsClosing))
-    end
-
-    return segments
+    return self.resolver:resolve(parsed.primary, context, parsed.optional)
 end
 
 -- function: Compose audio segments for an announcement request.
 function Composer:compose(request, metadata)
-    if request.type == "approach" then
-        return self:_composeApproach(request, metadata)
-    elseif request.type == "departure" then
-        return self:_composeDeparture()
+    local pattern = self.patterns[request.type]
+    if type(pattern) ~= "table" then
+        return {}
     end
 
-    return {}
+    local context = {
+        request = request,
+        metadata = metadata,
+    }
+
+    local output = {}
+    for _, entry in ipairs(pattern) do
+        appendAll(output, self:_resolveEntry(entry, context))
+    end
+
+    return output
 end
 
 return Composer

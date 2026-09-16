@@ -34,24 +34,11 @@ return {
     announcement = {
         approach = {
             melodyEnabled = true,
-            melody = "audio/approach/melody.dfpwm",
-            soon = "audio/approach/soon.dfpwm",
-            train = "audio/approach/train.dfpwm",
-            warning = "audio/approach/warning.dfpwm",
-
-            trackDir = "audio/track",
-            classDir = "audio/class",
-            destinationDir = "audio/destination",
-
             arrivalMelodyEnabled = false,
-            arrivalMelody = "audio/arrival/melody.dfpwm",
         },
 
         departure = {
-            melody = "audio/departure/melody.dfpwm",
-
             doorsClosingEnabled = false,
-            doorsClosing = "audio/departure/doors_closing.dfpwm",
         },
     },
 }

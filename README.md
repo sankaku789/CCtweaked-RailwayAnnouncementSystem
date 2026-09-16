@@ -23,32 +23,104 @@ IDLE
 - 2パルス目: PLATFORM状態へ遷移（MVPでは放送なし）
 - 3パルス目: 発車放送、その後IDLEへ自動復帰
 
-## 接近放送
+## 放送パターン
 
-以下の順でセグメントを合成します。
+放送順は `announcement/patterns.lua` に宣言します。
 
-```text
-[接近メロディ]         optional
-「まもなく、」
-[n番線に、]            ファイルがあれば再生
+```lua
+return {
+    approach = {
+        "?approach_melody",
+        "soon",
+        "?track",
+        "train_info|train",
+        "warning",
+        "?arrival_melody",
+    },
 
-Adapterから種別/行先を実際に再生できる場合:
-  [種別]
-  [行先]
-  ※「列車が」は省略
-
-情報がない場合:
-  「列車が、」
-
-「まいります。危険ですので、黄色い点字ブロックまで、お下がりください。」
-[到着メロディ]         optional / default OFF
+    departure = {
+        "departure_melody",
+        "?doors_closing",
+    },
+}
 ```
 
-発車時は発車メロディを再生し、`doorsClosingEnabled = true` の場合のみドア閉め放送を追加します。
+記法は以下の3種類です。
+
+```text
+segment
+    必須セグメント
+
+?segment
+    optional。解決できない場合はskip
+
+primary|fallback
+    primaryが再生可能ならprimary、解決できなければfallback
+```
+
+`train_info|train` は、種別音声と行先音声を両方解決できる場合だけ詳細放送を使い、
+どちらかが不足した場合は `train` の簡易放送へフォールバックします。
+
+## セグメント定義
+
+セグメントIDと実ファイル・動的Resolverの対応は `announcement/segments.lua` に定義します。
+
+固定ファイルの例:
+
+```lua
+soon = {
+    kind = "file",
+    path = "audio/approach/soon.dfpwm",
+},
+```
+
+設定で有効/無効を切り替えるセグメント:
+
+```lua
+arrival_melody = {
+    kind = "file",
+    path = "audio/arrival/melody.dfpwm",
+    enabled = "announcement.approach.arrivalMelodyEnabled",
+},
+```
+
+動的セグメントの例:
+
+```lua
+track = {
+    kind = "dynamic",
+    resolver = "track",
+    directory = "audio/track",
+},
+
+train_info = {
+    kind = "dynamic",
+    resolver = "train_info",
+    classDirectory = "audio/class",
+    destinationDirectory = "audio/destination",
+},
+```
+
+`track` は `request.track` から番線音声を解決します。
+`train_info` はMetadata Adapterの `class` と `destination` から2ファイルをまとめて解決します。
+
+Composerは物理ファイルパスを直接知りません。
+
+```text
+announcement/patterns.lua
+        ↓
+semantic segment IDs
+        ↓
+audio/segment.lua
+        ↓
+DFPWM file paths
+        ↓
+audio/player.lua
+```
 
 ## 音声ファイル
 
-デフォルト設定では以下のパスを使用します。
+デフォルトのセグメント定義では以下の構成を使用します。
 
 ```text
 audio/
@@ -63,21 +135,24 @@ audio/
 │  ├─ melody.dfpwm
 │  └─ doors_closing.dfpwm
 ├─ track/
-│  └─ 1.dfpwm
+│  ├─ 1.dfpwm
+│  ├─ 2.dfpwm
+│  └─ ...
 ├─ class/
-│  └─ <class-id>.dfpwm
+│  ├─ rapid.dfpwm
+│  ├─ limited_express.dfpwm
+│  └─ ...
 └─ destination/
-   └─ <destination-id>.dfpwm
+   ├─ central.dfpwm
+   └─ ...
 ```
 
-`track`、`class`、`destination`、各optional melodyはファイルが無ければskipします。
-固定文のファイルが無い場合は警告を出して、そのセグメントだけskipします。
+固定音声のパスを変える場合は `announcement/segments.lua` を編集します。
+番線・種別・行先のディレクトリも同ファイルのdynamic segment定義で変更できます。
 
 ## 設定
 
-`config.lua` を編集します。
-
-主な項目:
+`config.lua` の主な項目:
 
 - `trackNumber`: 番線番号
 - `redstone.side`: NEXTパルスを受ける通常Redstone入力面
@@ -85,6 +160,7 @@ audio/
 - `speaker.volume`: Speaker音量
 - `adapter.module`: Metadata Adapter名。既定は`none`
 - `adapter.cacheTtlMs`: MetadataのRAM cache TTL
+- `announcement.approach.melodyEnabled`: 接近メロディ。既定ON
 - `announcement.approach.arrivalMelodyEnabled`: 到着メロディ。既定OFF
 - `announcement.departure.doorsClosingEnabled`: ドア閉め放送。既定OFF
 
@@ -101,13 +177,14 @@ Adapterはセグメント合成に必要な情報だけを返します。
 }
 ```
 
-Adapterが失敗・未設定の場合、接近放送は自動的に「列車が」を使う簡易放送になります。
+Adapterが失敗・未設定の場合、`train_info` が解決できないため、
+`train_info|train` により簡易放送へフォールバックします。
 
 ### MTR Adapter
 
 `adapter/mtr.lua` はTransport Simulation CoreのSystem Map arrivals APIから、対象ホームの次列車1件を取得します。
 
-使用するMTRフィールドは以下です。
+使用するMTRフィールド:
 
 ```text
 routeNumber -> class
@@ -124,7 +201,7 @@ MTR側の名称は `日本語|English` を前提とし、`|` の右側の英語�
 New Town                -> new_town
 ```
 
-そのため、音声ファイルは正規化後のIDをそのままファイル名にします。
+対応する音声ファイル:
 
 ```text
 audio/class/rapid.dfpwm
@@ -133,7 +210,7 @@ audio/destination/central.dfpwm
 audio/destination/new_town.dfpwm
 ```
 
-MTR Adapterを使用する場合は、`config.lua` を設定します。
+MTR Adapterを使用する場合は `config.lua` を設定します。
 
 ```lua
 adapter = {
@@ -148,30 +225,13 @@ adapter = {
 }
 ```
 
-`baseUrl` はTSCのHTTP APIアドレスです。TSC単体の既定Webserver portは`8888`ですが、
-実際のMTR環境で別ポートを使用している場合はその値へ変更してください。
-
 `platformIdHex` は対象ホームのhex IDです。
-Adapterは以下のrequest相当を `/mtr/api/map/arrivals?dimension=<n>` へ送ります。
-
-```json
-{
-  "platformIdsHex": ["<platform-id-hex>"],
-  "maxCountPerPlatform": 1,
-  "maxCountTotal": 1
-}
-```
-
-HTTP/APIエラー、列車情報なし、英語部分を正規化できない場合はmetadataを返さず、
-Coreは簡易放送へフォールバックします。
+HTTP/APIエラー、列車情報なし、英語部分を正規化できない場合はmetadataを返しません。
 
 ## 複数Speaker
 
-旧実装のSpeakerごとの独立進行をやめ、同一DFPWM chunkを全Speakerへ投入した後、
-全Speakerの`speaker_audio_empty`を待つバリア方式で次chunkへ進みます。
-
-CC:Tweaked/Minecraft側のバッファやtickによる完全同期は保証できませんが、
-Speaker間でchunk位置が累積的にずれることを抑える設計です。
+同一DFPWM chunkを全Speakerへ投入した後、全Speakerの `speaker_audio_empty` を待つバリア方式で次chunkへ進みます。
+CC:Tweaked/Minecraft側のバッファやtickによる完全同期は保証しませんが、Speaker間でchunk位置が累積的にずれることを抑える設計です。
 
 ## コード規約
 
@@ -190,6 +250,10 @@ end
 startup.lua
 app.lua
 config.lua
+
+announcement/
+  patterns.lua
+  segments.lua
 
 core/
   track_state.lua

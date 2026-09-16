@@ -1,4 +1,6 @@
 local config = require("config")
+local announcementPatterns = require("announcement.patterns")
+local segmentDefinitions = require("announcement.segments")
 
 local log = require("util.log")
 local RedstoneInput = require("hardware.redstone_input")
@@ -43,8 +45,8 @@ function app.run()
     local speakers = Speakers.connect(config.speaker, log)
     local trackState = TrackState.new(config.state)
     local queue = Queue.new()
-    local resolver = Segment.new()
-    local composer = Composer.new(config, resolver)
+    local resolver = Segment.new(config, segmentDefinitions)
+    local composer = Composer.new(announcementPatterns, resolver)
     local player = Player.new(speakers, log)
 
     local adapter = loadAdapter()
