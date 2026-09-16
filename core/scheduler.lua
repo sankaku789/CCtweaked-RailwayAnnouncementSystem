@@ -123,7 +123,7 @@ function Scheduler:_handleNext()
     local transition = self.trackState:advance()
 
     if self.logger then
-        self.logger.info(("%s -> %s"):format(transition.previous, transition.state))
+        self.logger.event("State", ("%s -> %s"):format(transition.previous, transition.state))
     end
 
     self:_handleStateChange()
@@ -136,14 +136,17 @@ function Scheduler:_handleNext()
     end
 
     if transition.resetTo and self.logger then
-        self.logger.info("Track state automatically reset to " .. transition.resetTo)
+        self.logger.event("State", ("%s -> %s (automatic reset)"):format(
+            tostring(transition.state),
+            tostring(transition.resetTo)
+        ))
     end
 end
 
 -- function: Handle a PASSING bundled signal without advancing the stopping-train state machine.
 function Scheduler:_handlePassing()
     if self.logger then
-        self.logger.info("Passing train signal received.")
+        self.logger.event("Passing", ("signal received (track=%s)"):format(tostring(self.config.trackNumber)))
     end
 
     self:_enqueue("passing")
@@ -161,7 +164,7 @@ function Scheduler:_handleReset()
     self:_handleStateChange()
 
     if self.logger then
-        self.logger.info(("Track state manually reset: %s -> IDLE"):format(tostring(previous)))
+        self.logger.event("State", ("%s -> IDLE (manual reset)"):format(tostring(previous)))
     end
 end
 
@@ -206,7 +209,13 @@ function Scheduler:monitorPeriodic()
                         end
                         self.periodicNextAt[name] = currentTime + math.max(0, initialDelayMs)
                     elseif currentTime >= dueAt then
-                        self:_enqueue(cfg.type)
+                        local queued = self:_enqueue(cfg.type)
+                        if queued and self.logger then
+                            self.logger.event("Periodic", ("%s fired (state=%s)"):format(
+                                tostring(cfg.type),
+                                tostring(currentState)
+                            ))
+                        end
                         self.periodicNextAt[name] = currentTime + math.max(1000, intervalMs)
                     end
                 else
