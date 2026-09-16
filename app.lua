@@ -3,7 +3,7 @@ local announcementPatterns = require("announcement.patterns")
 local segmentDefinitions = require("announcement.segments")
 
 local log = require("util.log")
-local RedstoneInput = require("hardware.redstone_input")
+local RailwayInput = require("hardware.railway_input")
 local Speakers = require("hardware.speakers")
 local TrackState = require("core.track_state")
 local Queue = require("core.announcement_queue")
@@ -41,7 +41,7 @@ end
 function app.run()
     log.info("Railway Announcement System starting.")
 
-    local input = RedstoneInput.new(config.redstone.side)
+    local input = RailwayInput.new(config.input)
     local speakers = Speakers.connect(config.speaker, log)
     local trackState = TrackState.new(config.state)
     local queue = Queue.new()

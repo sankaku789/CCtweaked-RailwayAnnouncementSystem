@@ -10,9 +10,14 @@ function Provider.new(adapter, cache, logger)
     }, Provider)
 end
 
+-- function: Build the cache key for one track context.
+function Provider:_key(context)
+    return tostring((context and context.track) or "default")
+end
+
 -- function: Return cached metadata or fetch fresh metadata from the adapter.
 function Provider:get(context)
-    local key = tostring(context.track or "default")
+    local key = self:_key(context)
     local cached = self.cache:get(key)
     if cached then
         return cached
@@ -35,6 +40,11 @@ function Provider:get(context)
     end
 
     return metadata
+end
+
+-- function: Invalidate cached metadata for one track context.
+function Provider:invalidate(context)
+    self.cache:clear(self:_key(context))
 end
 
 return Provider

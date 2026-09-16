@@ -8,12 +8,21 @@ local function now()
     return os.epoch("utc")
 end
 
+-- function: Return the numeric priority for an announcement request.
+local function priorityOf(request)
+    return tonumber(request.priority) or 0
+end
+
 -- function: Build the deduplication key for an announcement request.
 local function requestKey(request)
+    if request.dedupeKey ~= nil then
+        return tostring(request.dedupeKey)
+    end
+
     return ("%s:%s"):format(tostring(request.type), tostring(request.track))
 end
 
--- function: Create an empty first-in-first-out announcement queue.
+-- function: Create an empty priority-aware announcement queue.
 function Queue.new()
     return setmetatable({
         items = {},
@@ -32,6 +41,7 @@ function Queue:enqueue(request)
     end
 
     request.createdAt = request.createdAt or now()
+    request.priority = priorityOf(request)
 
     self.items[#self.items + 1] = request
     self.keys[key] = true
@@ -40,25 +50,47 @@ function Queue:enqueue(request)
     return true
 end
 
--- function: Remove and return the oldest queued request without expiry checks.
-function Queue:_popRaw()
-    if #self.items == 0 then
-        return nil
+-- function: Remove and return one queued request by array index.
+function Queue:_removeAt(index)
+    local request = table.remove(self.items, index)
+    if request then
+        self.keys[requestKey(request)] = nil
     end
-
-    local request = table.remove(self.items, 1)
-    self.keys[requestKey(request)] = nil
     return request
 end
 
--- function: Return the oldest non-expired announcement request.
+-- function: Return the index of the highest-priority oldest queued request.
+function Queue:_bestIndex()
+    local bestIndex
+    local bestPriority
+    local bestCreatedAt
+
+    for index, request in ipairs(self.items) do
+        local priority = priorityOf(request)
+        local createdAt = tonumber(request.createdAt) or 0
+
+        if bestIndex == nil
+            or priority > bestPriority
+            or (priority == bestPriority and createdAt < bestCreatedAt)
+        then
+            bestIndex = index
+            bestPriority = priority
+            bestCreatedAt = createdAt
+        end
+    end
+
+    return bestIndex
+end
+
+-- function: Return the highest-priority oldest non-expired announcement request.
 function Queue:pop()
     while true do
-        local request = self:_popRaw()
-        if not request then
+        local index = self:_bestIndex()
+        if not index then
             return nil
         end
 
+        local request = self:_removeAt(index)
         if not request.expiresAt or request.expiresAt >= now() then
             return request
         end
@@ -75,6 +107,46 @@ function Queue:waitPop()
 
         os.pullEvent(EVENT_NAME)
     end
+end
+
+-- function: Remove every queued request whose priority is below the given value.
+function Queue:removeBelow(priority)
+    priority = tonumber(priority) or 0
+    local removed = 0
+
+    for index = #self.items, 1, -1 do
+        if priorityOf(self.items[index]) < priority then
+            self:_removeAt(index)
+            removed = removed + 1
+        end
+    end
+
+    return removed
+end
+
+-- function: Remove queued requests whose type exists in the supplied set or list.
+function Queue:removeTypes(types)
+    local lookup = {}
+
+    if type(types) == "table" then
+        for key, value in pairs(types) do
+            if type(key) == "number" then
+                lookup[tostring(value)] = true
+            elseif value then
+                lookup[tostring(key)] = true
+            end
+        end
+    end
+
+    local removed = 0
+    for index = #self.items, 1, -1 do
+        if lookup[tostring(self.items[index].type)] then
+            self:_removeAt(index)
+            removed = removed + 1
+        end
+    end
+
+    return removed
 end
 
 -- function: Return the number of queued announcement requests.

@@ -1,6 +1,8 @@
 local Speakers = {}
 Speakers.__index = Speakers
 
+local DRAIN_EVENT = "railway_speaker_drain_complete"
+
 -- function: Discover all currently attached speaker peripherals.
 local function discover()
     local wrapped = { peripheral.find("speaker") }
@@ -49,6 +51,19 @@ function Speakers:stop()
     end
 end
 
+-- function: Drain already-queued speaker events before starting a clean playback boundary.
+function Speakers:drainEvents()
+    sleep(0)
+    os.queueEvent(DRAIN_EVENT)
+
+    while true do
+        local event = os.pullEvent()
+        if event == DRAIN_EVENT then
+            return
+        end
+    end
+end
+
 -- function: Submit the same decoded audio chunk to every connected speaker.
 function Speakers:playChunk(audio)
     -- The player calls this only after the previous chunk reached the barrier,
@@ -73,14 +88,14 @@ function Speakers:playChunk(audio)
         end
 
         self:stop()
-        sleep(0)
+        self:drainEvents()
     end
 
     error("Failed to enqueue audio chunk to all speakers after resync attempts")
 end
 
--- function: Wait until every connected speaker has emptied its current audio buffer.
-function Speakers:waitUntilAllReady()
+-- function: Wait until every speaker is ready or an optional interrupt event is received.
+function Speakers:waitUntilAllReady(interruptEventName)
     local pending = {}
     local count = 0
 
@@ -90,13 +105,19 @@ function Speakers:waitUntilAllReady()
     end
 
     while count > 0 do
-        local _, name = os.pullEvent("speaker_audio_empty")
+        local event, name = os.pullEvent()
 
-        if pending[name] then
+        if interruptEventName and event == interruptEventName then
+            return false
+        end
+
+        if event == "speaker_audio_empty" and pending[name] then
             pending[name] = nil
             count = count - 1
         end
     end
+
+    return true
 end
 
 return Speakers

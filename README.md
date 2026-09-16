@@ -2,12 +2,30 @@
 
 CC:Tweaked向けの鉄道自動放送システムです。
 
-MVPでは「1線 = 1 Computer」を前提に、通常Redstone入力1本のNEXTパルスで内部状態を進めます。
-MTR/Createなどの鉄道MOD固有情報はMetadata Adapterから任意で取得し、取得できない場合でも簡易放送を継続します。
+「1線 = 1 Computer」を前提に、停車列車の状態管理、通過列車、MTR metadata、定期放送、複数Speaker再生を分離して扱います。
 
-## 状態遷移
+## 入力
 
-通常Redstone入力の立ち上がりごとに以下の順で状態を進めます。
+既定ではProjectRed等のBundled CableをCC:Tweakedのbundled redstone inputとして使用します。
+
+```text
+Bundled Cable (top)
+├─ lime   : NEXT
+└─ orange : PASSING
+
+Normal Redstone (back)
+└─ RESET button
+```
+
+`NEXT` は停車列車用の状態機械を1段進めます。
+`PASSING` は状態を変更せず、通過放送を直接Queueへ投入します。
+`RESET` はComputerへ直付けした通常Redstone buttonの立ち上がりで、状態を `IDLE` に戻します。
+
+色と面は `config.lua` の `input` で変更できます。
+
+## 停車列車の状態遷移
+
+`NEXT` の立ち上がりごとに以下の順で進みます。
 
 ```text
 IDLE
@@ -20,8 +38,58 @@ IDLE
 デフォルトではDEPARTUREイベント生成後に自動でIDLEへ戻るため、1列車あたり3パルスです。
 
 - 1パルス目: 接近放送
-- 2パルス目: PLATFORM状態へ遷移（MVPでは放送なし）
+- 2パルス目: PLATFORM状態へ遷移
 - 3パルス目: 発車放送、その後IDLEへ自動復帰
+
+`PASSING` はこの状態遷移には入りません。
+
+## 優先度と割り込み
+
+QueueはFIFOではなく、`priority` の高いrequestを先に処理します。同一priorityでは古いrequestが先です。
+
+既定priority:
+
+```text
+100  approach
+100  passing
+100  departure
+ 20  stopped
+ 10  next_train
+```
+
+`queue.preemptPriority` 以上のrequestが来た場合、低priorityの待機中requestを破棄し、低priority放送を再生中ならSpeakerを停止して高priority放送へ切り替えます。
+
+中断された定期放送は途中から再開しません。次の周期まで待ちます。
+
+## 定期放送
+
+`config.lua` の `periodic` で状態別の定期放送を設定できます。
+
+既定では音声アセット未配置時の連続警告を避けるためOFFです。
+
+```lua
+periodic = {
+    checkIntervalSeconds = 1,
+
+    stopped = {
+        enabled = false,
+        state = "PLATFORM",
+        type = "stopped",
+        initialDelayMs = 30000,
+        intervalMs = 30000,
+    },
+
+    nextTrain = {
+        enabled = false,
+        state = "IDLE",
+        type = "next_train",
+        initialDelayMs = 60000,
+        intervalMs = 60000,
+    },
+}
+```
+
+`stopped` は `PLATFORM` 中、`next_train` は `IDLE` 中だけ繰り返します。状態が変わると待機中の定期放送は破棄され、タイマーも新しい状態用にリセットされます。
 
 ## 放送パターン
 
@@ -38,14 +106,36 @@ return {
         "?arrival_melody",
     },
 
+    approach_out_of_service = {
+        "?approach_melody",
+        "soon",
+        "?track",
+        "out_of_service_train",
+        "warning",
+        "?arrival_melody",
+    },
+
+    passing = {
+        "passing_warning",
+    },
+
     departure = {
         "departure_melody",
         "?doors_closing",
     },
+
+    stopped = {
+        "stopped_notice",
+    },
+
+    next_train = {
+        "next_train_intro",
+        "train_info|next_train_generic",
+    },
 }
 ```
 
-記法は以下の3種類です。
+記法:
 
 ```text
 segment
@@ -58,33 +148,54 @@ primary|fallback
     primaryが再生可能ならprimary、解決できなければfallback
 ```
 
-`train_info|train` は、種別音声と行先音声を両方解決できる場合だけ詳細放送を使い、
-どちらかが不足した場合は `train` の簡易放送へフォールバックします。
+## 回送列車
+
+MTR AdapterはTransport Simulation CoreのArrivalResponseにある `isTerminating` を `metadata.terminating` として返します。
+
+```lua
+{
+    class = "rapid",
+    destination = "sapporo",
+    terminating = true,
+}
+```
+
+通常の `approach` requestでも `terminating == true` ならComposerが `approach_out_of_service` を選択します。
+
+これは `JR_Hokkaido_like_PIDS` と同じく「当駅止まり (`terminating`) を回送扱いする」判定です。
+
+## 通過列車
+
+通過列車はMTR arrivals APIから推測せず、遠方Sensor等からの専用Bundled signal `PASSING` で検知します。
+
+```text
+Remote train/redstone sensor
+        ↓
+Bundled PASSING signal
+        ↓
+CC Computer
+        ↓
+{ type = "passing", priority = 100 }
+        ↓
+passing announcement
+```
+
+通過信号は停車列車の `IDLE -> APPROACH -> PLATFORM -> DEPARTURE` 状態を変更しません。
 
 ## セグメント定義
 
 セグメントIDと実ファイル・動的Resolverの対応は `announcement/segments.lua` に定義します。
 
-固定ファイルの例:
+固定ファイル:
 
 ```lua
-soon = {
+passing_warning = {
     kind = "file",
-    path = "audio/approach/soon.dfpwm",
+    path = "audio/passing/warning.dfpwm",
 },
 ```
 
-設定で有効/無効を切り替えるセグメント:
-
-```lua
-arrival_melody = {
-    kind = "file",
-    path = "audio/arrival/melody.dfpwm",
-    enabled = "announcement.approach.arrivalMelodyEnabled",
-},
-```
-
-動的セグメントの例:
+動的セグメント:
 
 ```lua
 track = {
@@ -101,26 +212,11 @@ train_info = {
 },
 ```
 
-`track` は `request.track` から番線音声を解決します。
-`train_info` はMetadata Adapterの `class` と `destination` から2ファイルをまとめて解決します。
-
-Composerは物理ファイルパスを直接知りません。
-
-```text
-announcement/patterns.lua
-        ↓
-semantic segment IDs
-        ↓
-audio/segment.lua
-        ↓
-DFPWM file paths
-        ↓
-audio/player.lua
-```
+`train_info` は種別と行先の両ファイルが存在するときだけ2ファイルを返します。
 
 ## 音声ファイル
 
-デフォルトのセグメント定義では以下の構成を使用します。
+既定の構成:
 
 ```text
 audio/
@@ -128,12 +224,20 @@ audio/
 │  ├─ melody.dfpwm
 │  ├─ soon.dfpwm
 │  ├─ train.dfpwm
+│  ├─ out_of_service_train.dfpwm
 │  └─ warning.dfpwm
 ├─ arrival/
 │  └─ melody.dfpwm
+├─ passing/
+│  └─ warning.dfpwm
 ├─ departure/
 │  ├─ melody.dfpwm
 │  └─ doors_closing.dfpwm
+├─ stopped/
+│  └─ notice.dfpwm
+├─ next_train/
+│  ├─ intro.dfpwm
+│  └─ generic.dfpwm
 ├─ track/
 │  ├─ 1.dfpwm
 │  ├─ 2.dfpwm
@@ -143,74 +247,31 @@ audio/
 │  ├─ limited_express.dfpwm
 │  └─ ...
 └─ destination/
-   ├─ central.dfpwm
+   ├─ sapporo.dfpwm
    └─ ...
 ```
 
-固定音声のパスを変える場合は `announcement/segments.lua` を編集します。
-番線・種別・行先のディレクトリも同ファイルのdynamic segment定義で変更できます。
-
-## 設定
-
-`config.lua` の主な項目:
-
-- `trackNumber`: 番線番号
-- `redstone.side`: NEXTパルスを受ける通常Redstone入力面
-- `state.autoResetAfterDeparture`: DEPARTURE後に自動でIDLEへ戻す
-- `speaker.volume`: Speaker音量
-- `adapter.module`: Metadata Adapter名。既定は`none`
-- `adapter.cacheTtlMs`: MetadataのRAM cache TTL
-- `announcement.approach.melodyEnabled`: 接近メロディ。既定ON
-- `announcement.approach.arrivalMelodyEnabled`: 到着メロディ。既定OFF
-- `announcement.departure.doorsClosingEnabled`: ドア閉め放送。既定OFF
-
 ## Metadata Adapter
 
-CoreはMTR/CreateのAPIを直接参照しません。
+CoreはMTR/Create固有APIを直接参照しません。
 
-Adapterはセグメント合成に必要な情報だけを返します。
-
-```lua
-{
-    class = "rapid",
-    destination = "central",
-}
-```
-
-Adapterが失敗・未設定の場合、`train_info` が解決できないため、
-`train_info|train` により簡易放送へフォールバックします。
-
-### MTR Adapter
-
-`adapter/mtr.lua` はTransport Simulation CoreのSystem Map arrivals APIから、対象ホームの次列車1件を取得します。
-
-使用するMTRフィールド:
+MTR Adapterは `/mtr/api/map/arrivals` から対象ホームの次列車1件を取得し、以下を使用します。
 
 ```text
-routeNumber -> class
-destination -> destination
+routeNumber   -> class
+destination   -> destination
+isTerminating -> terminating
 ```
 
-MTR側の名称は `日本語|English` を前提とし、`|` の右側の英語部分を音声IDへ変換します。
-大文字小文字は区別せず、英数字以外の連続文字は `_` に正規化します。
+MTR側の名称は `日本語|English` の右側を使用し、小文字化して英数字以外の連続文字を `_` に正規化します。
 
 ```text
-快速|Rapid              -> rapid
-特急|Limited Express    -> limited_express
-中央|Central            -> central
-New Town                -> new_town
+快速|Rapid           -> rapid
+特急|Limited Express -> limited_express
+札幌|SAPPORO         -> sapporo
 ```
 
-対応する音声ファイル:
-
-```text
-audio/class/rapid.dfpwm
-audio/class/limited_express.dfpwm
-audio/destination/central.dfpwm
-audio/destination/new_town.dfpwm
-```
-
-MTR Adapterを使用する場合は `config.lua` を設定します。
+MTR Adapter設定例:
 
 ```lua
 adapter = {
@@ -225,21 +286,23 @@ adapter = {
 }
 ```
 
-`platformIdHex` は対象ホームのhex IDです。
-HTTP/APIエラー、列車情報なし、英語部分を正規化できない場合はmetadataを返しません。
+DEPARTUREまたは手動RESET時にはtrack metadata cacheを無効化し、その後の次列車案内が前列車のcacheを使い続けないようにします。
 
-## 複数Speaker
+## 複数Speakerと割り込み
 
-同一DFPWM chunkを全Speakerへ投入した後、全Speakerの `speaker_audio_empty` を待つバリア方式で次chunkへ進みます。
-CC:Tweaked/Minecraft側のバッファやtickによる完全同期は保証しませんが、Speaker間でchunk位置が累積的にずれることを抑える設計です。
+同一DFPWM chunkを全Speakerへ投入した後、全Speakerの `speaker_audio_empty` を待つバリア方式です。
+
+高priority requestによる割り込み時は全Speakerを `stop()` し、Playerの待機を専用eventで解除します。stop/retry後に残る古い `speaker_audio_empty` が次のchunk barrierへ混ざりにくいよう、再開前にeventをdrainします。
+
+Minecraft/CC:Tweaked側を含むsample単位の完全同期は保証しません。
 
 ## コード規約
 
 各Lua関数の直前には、旧コードと同様に英語で機能を示すコメントを付けます。
 
 ```lua
--- function: Play an ordered list of audio segment files.
-function Player:playSegments(segments)
+-- function: Play an ordered list of audio segment files at one announcement priority.
+function Player:playSegments(segments, priority)
     ...
 end
 ```
@@ -262,7 +325,7 @@ core/
   scheduler.lua
 
 hardware/
-  redstone_input.lua
+  railway_input.lua
   speakers.lua
 
 audio/

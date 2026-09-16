@@ -58,6 +58,19 @@ function Composer.new(patterns, resolver)
     }, Composer)
 end
 
+-- function: Select the pattern variant for a request and its metadata.
+function Composer:_patternName(request, metadata)
+    if request.type == "approach"
+        and type(metadata) == "table"
+        and metadata.terminating == true
+        and type(self.patterns.approach_out_of_service) == "table"
+    then
+        return "approach_out_of_service"
+    end
+
+    return request.type
+end
+
 -- function: Resolve one pattern entry into zero or more audio file paths.
 function Composer:_resolveEntry(entry, context)
     local parsed = parseEntry(entry)
@@ -76,7 +89,8 @@ end
 
 -- function: Compose audio segments for an announcement request.
 function Composer:compose(request, metadata)
-    local pattern = self.patterns[request.type]
+    local patternName = self:_patternName(request, metadata)
+    local pattern = self.patterns[patternName]
     if type(pattern) ~= "table" then
         return {}
     end

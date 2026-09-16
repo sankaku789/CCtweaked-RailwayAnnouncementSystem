@@ -28,6 +28,11 @@ return {
         path = "audio/approach/train.dfpwm",
     },
 
+    out_of_service_train = {
+        kind = "file",
+        path = "audio/approach/out_of_service_train.dfpwm",
+    },
+
     warning = {
         kind = "file",
         path = "audio/approach/warning.dfpwm",
@@ -39,6 +44,11 @@ return {
         enabled = "announcement.approach.arrivalMelodyEnabled",
     },
 
+    passing_warning = {
+        kind = "file",
+        path = "audio/passing/warning.dfpwm",
+    },
+
     departure_melody = {
         kind = "file",
         path = "audio/departure/melody.dfpwm",
@@ -48,5 +58,20 @@ return {
         kind = "file",
         path = "audio/departure/doors_closing.dfpwm",
         enabled = "announcement.departure.doorsClosingEnabled",
+    },
+
+    stopped_notice = {
+        kind = "file",
+        path = "audio/stopped/notice.dfpwm",
+    },
+
+    next_train_intro = {
+        kind = "file",
+        path = "audio/next_train/intro.dfpwm",
+    },
+
+    next_train_generic = {
+        kind = "file",
+        path = "audio/next_train/generic.dfpwm",
     },
 }

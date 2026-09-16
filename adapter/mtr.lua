@@ -165,7 +165,7 @@ function MtrAdapter:_requestArrival()
     return data.arrivals[1]
 end
 
--- function: Return normalized class and destination metadata for the next MTR arrival.
+-- function: Return normalized train metadata and terminating status for the next MTR arrival.
 function MtrAdapter:getMetadata(_context)
     local arrival = self:_requestArrival()
     if not arrival then
@@ -174,14 +174,16 @@ function MtrAdapter:getMetadata(_context)
 
     local classId = normalizeAssetId(arrival.routeNumber)
     local destinationId = normalizeAssetId(arrival.destination)
+    local terminating = arrival.isTerminating == true
 
-    if not classId and not destinationId then
+    if not classId and not destinationId and not terminating then
         return nil
     end
 
     return {
         class = classId,
         destination = destinationId,
+        terminating = terminating,
     }
 end
 
