@@ -5,8 +5,8 @@ return {
         bundled = {
             side = "top",
             signals = {
-                next = colors.lime,
-                passing = colors.orange,
+                next = colors.red,
+                passing = colors.blue,
             },
         },
 
