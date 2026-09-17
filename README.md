@@ -12,9 +12,9 @@ CC:Tweaked向けの鉄道自動放送システムです。
 wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncementSystem/main/install.lua
 ```
 
-同じコマンドを再実行するとruntime sourceを更新します。既存の `config.lua`、`data/`、DFPWM音声ファイルは保持します。
+同じコマンドを再実行するとruntime sourceを更新します。既存の `config.lua`、`announcement_patterns/`、DFPWM音声ファイルは保持します。
 
-旧レイアウトから更新した場合は、新しい `src/` を配置した後に旧 `adapter/`、`core/`、`hardware/` などのcode directoryを削除します。
+旧 `data/` レイアウトから更新した場合は、既存の放送定義を `announcement_patterns/` へ移行して保持します。旧コードレイアウトから更新した場合は、新しい `src/` を配置した後に旧 `adapter/`、`core/`、`hardware/` などのcode directoryを削除します。
 
 ## ディレクトリ構成
 
@@ -23,8 +23,8 @@ startup.lua
 config.lua
 install.lua
 
-data/
-  patterns.lua
+announcement_patterns/
+  main.lua
   segments.lua
   route_options.lua
 
@@ -67,10 +67,10 @@ audio/
 役割:
 
 ```text
-config.lua  -> このComputer固有の設定
-data/       -> 放送定義とRoute別設定
-src/        -> 実行ロジック
-audio/      -> DFPWM音声アセット
+config.lua              -> このComputer固有の設定
+announcement_patterns/  -> 放送パターン・セグメント・Route別設定
+src/                    -> 実行ロジック
+audio/                  -> DFPWM音声アセット
 ```
 
 `startup.lua` が `/src/?.lua` を `package.path` に追加するため、`src/` 内部では従来通り `require("core.scheduler")` のように参照できます。
@@ -156,7 +156,7 @@ periodic = {
 
 ## 放送パターン
 
-放送順は `data/patterns.lua` に宣言します。
+放送順は `announcement_patterns/main.lua` に宣言します。
 
 ```lua
 return {
@@ -188,7 +188,7 @@ primary|fallback primaryが解決できなければfallback
 
 ## セグメント定義
 
-セグメントIDと実ファイル・dynamic resolverの対応は `data/segments.lua` に定義します。
+セグメントIDと実ファイル・dynamic resolverの対応は `announcement_patterns/segments.lua` に定義します。
 
 ```lua
 track = {
@@ -210,7 +210,7 @@ route_options = {
 },
 ```
 
-Route別に使う追加音声も通常のセグメントとして `data/segments.lua` に定義します。
+Route別に使う追加音声も通常のセグメントとして `announcement_patterns/segments.lua` に定義します。
 
 ```lua
 airport_access = {
@@ -234,7 +234,7 @@ MTR AdapterはTSC ArrivalResponseの `routeId` をmetadataへ追加します。
 
 TSCのRoute IDは64bit整数なので、MTR AdapterはJSON decode前に `routeId` をdecimal stringへ変換し、Lua numberの精度損失を避けます。
 
-Routeごとの追加放送は `data/route_options.lua` にセグメントIDだけを書きます。
+Routeごとの追加放送は `announcement_patterns/route_options.lua` にセグメントIDだけを書きます。
 
 ```lua
 return {
@@ -256,10 +256,10 @@ return {
 ```text
 MTR ArrivalResponse
   -> routeIdを文字列で保持
-  -> data/route_options.lua[routeId]
+  -> announcement_patterns/route_options.lua[routeId]
   -> request.type (approach / next_train / ...)
   -> segment ID一覧
-  -> data/segments.lua
+  -> announcement_patterns/segments.lua
   -> DFPWM file
 ```
 

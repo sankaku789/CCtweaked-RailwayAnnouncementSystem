@@ -30,9 +30,9 @@ local RUNTIME_FILES = {
 
 local PRESERVED_FILES = {
     "config.lua",
-    "data/patterns.lua",
-    "data/segments.lua",
-    "data/route_options.lua",
+    "announcement_patterns/main.lua",
+    "announcement_patterns/segments.lua",
+    "announcement_patterns/route_options.lua",
 }
 
 local AUDIO_DIRECTORIES = {
@@ -61,6 +61,21 @@ local LEGACY_DIRECTORIES = {
     "hardware",
     "metadata",
     "util",
+}
+
+local LEGACY_PATTERN_FILES = {
+    {
+        source = "data/patterns.lua",
+        target = "announcement_patterns/main.lua",
+    },
+    {
+        source = "data/segments.lua",
+        target = "announcement_patterns/segments.lua",
+    },
+    {
+        source = "data/route_options.lua",
+        target = "announcement_patterns/route_options.lua",
+    },
 }
 
 local arguments = { ... }
@@ -143,6 +158,33 @@ local function downloadFile(repositoryPath, preserveExisting)
     print("Install -> " .. repositoryPath)
 end
 
+-- function: Move legacy data files into the announcement_patterns directory without overwriting local files.
+local function migrateLegacyPatternFiles()
+    for _, mapping in ipairs(LEGACY_PATTERN_FILES) do
+        local source = targetPath(mapping.source)
+        local target = targetPath(mapping.target)
+
+        if fs.exists(source) and not fs.isDir(source) then
+            if fs.exists(target) then
+                print("Keep legacy -> " .. mapping.source)
+            else
+                ensureParent(target)
+                fs.move(source, target)
+                print(("Migrate -> %s -> %s"):format(mapping.source, mapping.target))
+            end
+        end
+    end
+
+    local legacyDirectory = targetPath("data")
+    if fs.exists(legacyDirectory) and fs.isDir(legacyDirectory) then
+        local remaining = fs.list(legacyDirectory)
+        if #remaining == 0 then
+            fs.delete(legacyDirectory)
+            print("Remove legacy -> data/")
+        end
+    end
+end
+
 -- function: Create all directories reserved for DFPWM announcement assets.
 local function createAudioDirectories()
     for _, repositoryPath in ipairs(AUDIO_DIRECTORIES) do
@@ -170,13 +212,15 @@ local function removeLegacyLayout()
     end
 end
 
--- function: Install or update runtime sources while preserving station-specific data and audio.
+-- function: Install or update runtime sources while preserving station-specific announcement patterns and audio.
 local function install()
     if type(http) ~= "table" or type(http.get) ~= "function" then
         error("CC:Tweaked HTTP API is unavailable")
     end
 
     print(("Installing CCtweaked Railway Announcement System (%s)..."):format(ref))
+
+    migrateLegacyPatternFiles()
 
     for _, repositoryPath in ipairs(RUNTIME_FILES) do
         downloadFile(repositoryPath, false)
@@ -190,7 +234,7 @@ local function install()
     removeLegacyLayout()
 
     print("Installation complete.")
-    print("config.lua, data files, and existing audio files were preserved.")
+    print("config.lua, announcement patterns, and existing audio files were preserved.")
 end
 
 install()

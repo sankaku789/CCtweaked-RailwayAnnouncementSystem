@@ -1,7 +1,7 @@
 local config = require("config")
-local announcementPatterns = require("data.patterns")
-local segmentDefinitions = require("data.segments")
-local routeOptions = require("data.route_options")
+local announcementPatterns = require("announcement_patterns.main")
+local segmentDefinitions = require("announcement_patterns.segments")
+local routeOptions = require("announcement_patterns.route_options")
 
 local log = require("util.log")
 local RailwayInput = require("hardware.railway_input")
