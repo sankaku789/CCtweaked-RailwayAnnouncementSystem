@@ -64,37 +64,7 @@ function Speakers:drainEvents()
     end
 end
 
--- function: Submit the same decoded audio chunk to every connected speaker.
-function Speakers:playChunk(audio)
-    -- The player calls this only after the previous chunk reached the barrier,
-    -- so every speaker should be ready. If a speaker unexpectedly rejects the
-    -- chunk, stop all speakers and retry the same chunk from a clean boundary.
-    for attempt = 1, 3 do
-        local acceptedAll = true
-
-        for _, device in ipairs(self.devices) do
-            if not device.peripheral.playAudio(audio, self.volume) then
-                acceptedAll = false
-                break
-            end
-        end
-
-        if acceptedAll then
-            return true
-        end
-
-        if self.logger then
-            self.logger.warn(("Speaker buffer was unexpectedly busy; resync attempt %d/3."):format(attempt))
-        end
-
-        self:stop()
-        self:drainEvents()
-    end
-
-    error("Failed to enqueue audio chunk to all speakers after resync attempts")
-end
-
--- function: Wait until every speaker is ready or an optional interrupt event is received.
+-- function: Wait until every speaker has emptied its current audio buffer or playback is interrupted.
 function Speakers:waitUntilAllReady(interruptEventName)
     local pending = {}
     local count = 0
@@ -118,6 +88,42 @@ function Speakers:waitUntilAllReady(interruptEventName)
     end
 
     return true
+end
+
+-- function: Submit one prepared PCM chunk without creating an artificial playback boundary.
+function Speakers:playChunk(audio, interruptEventName)
+    while true do
+        local acceptedCount = 0
+        local retry = false
+
+        for _, device in ipairs(self.devices) do
+            if device.peripheral.playAudio(audio, self.volume) then
+                acceptedCount = acceptedCount + 1
+            else
+                if acceptedCount > 0 then
+                    self:stop()
+                    self:drainEvents()
+                    error("Speaker buffers lost synchronization during continuous playback")
+                end
+
+                local ready = self:waitUntilAllReady(interruptEventName)
+                if not ready then
+                    return false
+                end
+
+                retry = true
+                break
+            end
+        end
+
+        if acceptedCount == #self.devices then
+            return true
+        end
+
+        if not retry then
+            error("Failed to enqueue audio chunk to all speakers")
+        end
+    end
 end
 
 return Speakers

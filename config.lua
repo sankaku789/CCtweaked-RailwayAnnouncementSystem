@@ -72,8 +72,14 @@ return {
         cacheTtlMs = 30000,
 
         mtr = {
-            baseUrl = "http://localhost:8888",
+            baseUrl = "http://127.0.0.1:8888",
             dimension = 0,
+
+            -- Preferred: exact station/platform name matching through the TSC HTTP API.
+            stationName = "",
+            platformName = "",
+
+            -- Optional direct override. When set, stationName/platformName are ignored.
             platformIdHex = "",
         },
     },

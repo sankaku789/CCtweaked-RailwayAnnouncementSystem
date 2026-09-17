@@ -48,6 +48,34 @@ local function isPrintableAscii(value)
     return true
 end
 
+-- function: Select the printable ASCII display name used for exact configuration matching.
+local function asciiName(value)
+    local selected = englishPart(value)
+    if not selected or not isPrintableAscii(selected) then
+        return nil
+    end
+
+    return selected
+end
+
+-- function: Match a configured station or platform name exactly against raw or English MTR text.
+local function nameMatches(value, expected)
+    if type(value) ~= "string" or type(expected) ~= "string" then
+        return false
+    end
+
+    expected = trim(expected)
+    if expected == "" then
+        return false
+    end
+
+    if trim(value) == expected then
+        return true
+    end
+
+    return asciiName(value) == expected
+end
+
 -- function: Normalize an MTR English name into a case-insensitive audio asset ID.
 local function normalizeAssetId(value)
     local english = englishPart(value)
@@ -109,71 +137,155 @@ function MtrAdapter.new(options)
     return setmetatable({
         baseUrl = normalizeBaseUrl(cfg.baseUrl),
         dimension = tonumber(cfg.dimension) or 0,
-        platformIdHex = cfg.platformIdHex,
+        platformIdHex = type(cfg.platformIdHex) == "string" and trim(cfg.platformIdHex) or "",
+        stationName = type(cfg.stationName) == "string" and trim(cfg.stationName) or "",
+        platformName = type(cfg.platformName) == "string" and trim(cfg.platformName) or "",
+        stationIdHex = nil,
     }, MtrAdapter)
 end
 
--- function: Request the next arrival for the configured MTR platform.
-function MtrAdapter:_requestArrival()
+-- function: Request and decode one TSC system-map HTTP endpoint.
+function MtrAdapter:_requestMap(endpoint, requestBody, keepRouteIdsExact)
     if not self.baseUrl then
         error("MTR adapter baseUrl is not configured")
     end
 
-    if type(self.platformIdHex) ~= "string" or trim(self.platformIdHex) == "" then
-        error("MTR adapter platformIdHex is not configured")
-    end
-
-    if type(http) ~= "table" or type(http.post) ~= "function" then
+    if type(http) ~= "table" or type(http.get) ~= "function" or type(http.post) ~= "function" then
         error("CC:Tweaked HTTP API is unavailable")
     end
 
-    local requestBody = textutils.serializeJSON({
-        platformIdsHex = { trim(self.platformIdHex) },
-        maxCountPerPlatform = 1,
-        maxCountTotal = 1,
-    })
-
-    local url = ("%s/mtr/api/map/arrivals?dimension=%d"):format(
+    local url = ("%s/mtr/api/map/%s?dimension=%d"):format(
         self.baseUrl,
+        endpoint,
         self.dimension
     )
 
-    local response, requestError, errorResponse = http.post(
-        url,
-        requestBody,
-        {
-            ["Content-Type"] = "application/json",
+    local response, requestError, errorResponse
+    if requestBody ~= nil then
+        response, requestError, errorResponse = http.post(
+            url,
+            textutils.serializeJSON(requestBody),
+            {
+                ["Content-Type"] = "application/json",
+                ["Accept"] = "application/json",
+            }
+        )
+    else
+        response, requestError, errorResponse = http.get(url, {
             ["Accept"] = "application/json",
-        }
-    )
+        })
+    end
 
     if not response then
         if errorResponse then
             errorResponse.close()
         end
-        error("MTR arrivals request failed: " .. tostring(requestError))
+        error(("MTR %s request failed: %s"):format(endpoint, tostring(requestError)))
     end
 
-    local raw = preserveRouteIds(readResponse(response))
-    local payload = textutils.unserializeJSON(raw)
+    local raw = readResponse(response)
+    if keepRouteIdsExact then
+        raw = preserveRouteIds(raw)
+    end
 
+    local payload = textutils.unserializeJSON(raw)
     if type(payload) ~= "table" then
-        error("MTR arrivals response is not valid JSON")
+        error(("MTR %s response is not valid JSON"):format(endpoint))
     end
 
     if tonumber(payload.status) ~= 200 then
-        error(("MTR arrivals API returned status %s: %s"):format(
+        error(("MTR %s API returned status %s: %s"):format(
+            endpoint,
             tostring(payload.status),
             tostring(payload.text)
         ))
     end
 
-    local data = payload.data
-    if type(data) ~= "table" or type(data.arrivals) ~= "table" then
+    return payload.data
+end
+
+-- function: Resolve the configured station name to one exact TSC station hex ID.
+function MtrAdapter:_resolveStationIdHex()
+    if self.stationIdHex then
+        return self.stationIdHex
+    end
+
+    if self.stationName == "" then
+        error("MTR adapter stationName is not configured")
+    end
+
+    local data = self:_requestMap("stations-and-routes", nil, false)
+    local stations = type(data) == "table" and data.stations or nil
+    if type(stations) ~= "table" then
+        error("MTR stations-and-routes response does not contain stations")
+    end
+
+    local matchedId = nil
+    local matchCount = 0
+
+    for _, station in ipairs(stations) do
+        if type(station) == "table" and nameMatches(station.name, self.stationName) then
+            if type(station.id) == "string" and trim(station.id) ~= "" then
+                matchedId = trim(station.id)
+                matchCount = matchCount + 1
+            end
+        end
+    end
+
+    if matchCount == 0 then
+        error("MTR station was not found by exact name: " .. self.stationName)
+    end
+
+    if matchCount > 1 then
+        error("MTR station name matched more than one station: " .. self.stationName)
+    end
+
+    self.stationIdHex = matchedId
+    return matchedId
+end
+
+-- function: Build an arrivals request for a direct platform ID or configured station name.
+function MtrAdapter:_buildArrivalsRequest()
+    if self.platformIdHex ~= "" then
+        return {
+            platformIdsHex = { self.platformIdHex },
+            maxCountPerPlatform = 1,
+            maxCountTotal = 1,
+        }, true
+    end
+
+    if self.platformName == "" then
+        error("MTR adapter platformName is not configured")
+    end
+
+    return {
+        stationIdsHex = { self:_resolveStationIdHex() },
+        maxCountPerPlatform = 1,
+        maxCountTotal = 0,
+    }, false
+end
+
+-- function: Request the next arrival for the configured MTR platform.
+function MtrAdapter:_requestArrival()
+    local requestBody, directPlatform = self:_buildArrivalsRequest()
+    local data = self:_requestMap("arrivals", requestBody, true)
+    local arrivals = type(data) == "table" and data.arrivals or nil
+
+    if type(arrivals) ~= "table" then
         return nil
     end
 
-    return data.arrivals[1]
+    if directPlatform then
+        return arrivals[1]
+    end
+
+    for _, arrival in ipairs(arrivals) do
+        if type(arrival) == "table" and nameMatches(arrival.platformName, self.platformName) then
+            return arrival
+        end
+    end
+
+    return nil
 end
 
 -- function: Return normalized train metadata, route ID, and terminating status for the next MTR arrival.

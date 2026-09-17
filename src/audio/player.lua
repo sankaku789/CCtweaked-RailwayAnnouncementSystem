@@ -3,8 +3,27 @@ local dfpwm = require("cc.audio.dfpwm")
 local Player = {}
 Player.__index = Player
 
-local CHUNK_SIZE = 16 * 1024
+local DFPWM_READ_SIZE = 4 * 1024
+local PCM_CHUNK_SIZE = 128 * 1024
 local INTERRUPT_EVENT = "railway_player_interrupt"
+
+-- function: Check whether a playback item is an explicit pause directive.
+local function isPause(item)
+    return type(item) == "table" and item.kind == "pause"
+end
+
+-- function: Return the audio path represented by one composed playback item.
+local function audioPath(item)
+    if type(item) == "string" then
+        return item
+    end
+
+    if type(item) == "table" and item.kind == "audio" then
+        return item.path
+    end
+
+    return nil
+end
 
 -- function: Create an audio player for the connected speakers.
 function Player.new(speakers, logger)
@@ -50,31 +69,60 @@ function Player:interruptBelow(priority)
     return true
 end
 
--- function: Decode and play one DFPWM audio file with interrupt support.
-function Player:playFile(path)
-    if self.interruptRequested then
-        return false, "interrupted"
-    end
+-- function: Decode adjacent DFPWM files into one continuous PCM stream and play it without file-boundary waits.
+function Player:_playAudioRun(paths)
+    local pcm = {}
+    local pcmCount = 0
+    local submittedAudio = false
 
-    if not self:_validFile(path) then
-        if self.logger then
-            self.logger.warn("Audio file was not found: " .. tostring(path))
-        end
-        return false, "missing"
-    end
-
-    local decoder = dfpwm.make_decoder()
-
-    for input in io.lines(path, CHUNK_SIZE) do
+    for _, path in ipairs(paths) do
         if self.interruptRequested then
             return false, "interrupted"
         end
 
-        local decoded = decoder(input)
+        if not self:_validFile(path) then
+            if self.logger then
+                self.logger.warn("Audio file was not found: " .. tostring(path))
+            end
+        else
+            local decoder = dfpwm.make_decoder()
 
-        -- All speakers receive the same decoded chunk before any speaker advances.
-        self.speakers:playChunk(decoded)
+            for input in io.lines(path, DFPWM_READ_SIZE) do
+                if self.interruptRequested then
+                    return false, "interrupted"
+                end
 
+                local decoded = decoder(input)
+
+                for sampleIndex = 1, #decoded do
+                    pcmCount = pcmCount + 1
+                    pcm[pcmCount] = decoded[sampleIndex]
+
+                    if pcmCount == PCM_CHUNK_SIZE then
+                        local accepted = self.speakers:playChunk(pcm, INTERRUPT_EVENT)
+                        if not accepted or self.interruptRequested then
+                            return false, "interrupted"
+                        end
+
+                        submittedAudio = true
+                        pcm = {}
+                        pcmCount = 0
+                    end
+                end
+            end
+        end
+    end
+
+    if pcmCount > 0 then
+        local accepted = self.speakers:playChunk(pcm, INTERRUPT_EVENT)
+        if not accepted or self.interruptRequested then
+            return false, "interrupted"
+        end
+
+        submittedAudio = true
+    end
+
+    if submittedAudio then
         local ready = self.speakers:waitUntilAllReady(INTERRUPT_EVENT)
         if not ready or self.interruptRequested then
             return false, "interrupted"
@@ -82,6 +130,11 @@ function Player:playFile(path)
     end
 
     return true
+end
+
+-- function: Decode and play one DFPWM audio file with interrupt support.
+function Player:playFile(path)
+    return self:_playAudioRun({ path })
 end
 
 -- function: Wait for a pattern pause while remaining responsive to announcement interrupts.
@@ -113,33 +166,42 @@ function Player:_waitPause(seconds)
     end
 end
 
--- function: Play one audio or pause item from a composed announcement.
-function Player:_playItem(item)
-    if type(item) == "table" then
-        if item.kind == "pause" then
-            return self:_waitPause(item.seconds)
-        elseif item.kind == "audio" then
-            return self:playFile(item.path)
-        end
-
-        error("unknown playback item kind: " .. tostring(item.kind))
-    end
-
-    return self:playFile(item)
-end
-
 -- function: Play an ordered list of audio and pause items at one announcement priority.
 function Player:playSegments(segments, priority)
     self.currentPriority = tonumber(priority) or 0
     self.interruptRequested = false
 
     local completed = true
+    local index = 1
 
-    for _, item in ipairs(segments) do
-        local ok, reason = self:_playItem(item)
-        if not ok and reason == "interrupted" then
-            completed = false
-            break
+    while index <= #segments do
+        local item = segments[index]
+
+        if isPause(item) then
+            local ok, reason = self:_waitPause(item.seconds)
+            if not ok and reason == "interrupted" then
+                completed = false
+                break
+            end
+            index = index + 1
+        else
+            local paths = {}
+
+            while index <= #segments and not isPause(segments[index]) do
+                local path = audioPath(segments[index])
+                if not path then
+                    error("unknown playback item kind")
+                end
+
+                paths[#paths + 1] = path
+                index = index + 1
+            end
+
+            local ok, reason = self:_playAudioRun(paths)
+            if not ok and reason == "interrupted" then
+                completed = false
+                break
+            end
         end
     end
 
