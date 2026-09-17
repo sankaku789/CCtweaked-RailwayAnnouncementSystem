@@ -56,10 +56,10 @@ Normal Redstone (back)
 `NEXT` は停車列車の状態を進め、`PASSING` は状態を変えず通過放送をQueueへ投入します。
 
 ```text
-IDLE -> APPROACH -> PLATFORM -> DEPARTURE -> IDLE
+IDLE --approach--> PLATFORM --departure--> IDLE
 ```
 
-1列車につき既定では3回の `NEXT` パルスです。
+1列車につき既定では2回の `NEXT` パルスです。
 
 ## MTR / TSC metadata
 
