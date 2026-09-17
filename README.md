@@ -165,14 +165,22 @@ return {
         "soon",
         "?track",
         "train_info|train",
-        "?route_options",
         "warning",
         "?arrival_melody",
+        "@pause:0.3",
+        "?route_options",
+    },
+
+    departure = {
+        "departure_melody",
+        "@pause:0.3",
+        "?doors_closing",
     },
 
     next_train = {
         "next_train_intro",
         "train_info|next_train_generic",
+        "@pause:1.0",
         "?route_options",
     },
 }
@@ -184,7 +192,12 @@ return {
 segment          必須セグメント
 ?segment         optional。解決できない場合はskip
 primary|fallback primaryが解決できなければfallback
+@pause:0.3       0.3秒の無音待機
 ```
+
+`@pause` は音声ファイルではなくtimer待機として処理されます。pause中も高priority requestによる割り込みを受けられます。optional segmentが解決できずpauseが先頭・末尾に残った場合はComposerが除去し、隣接したpauseは長い方へまとめます。
+
+既定パターンはKtomsの間隔設計を参考に、文章を構成する通常セグメント間には人工的なpauseを入れず、Route別追加案内の前を接近放送では0.3秒、次列車案内では1.0秒、発車メロディからドア案内までは0.3秒空けます。
 
 ## セグメント定義
 
@@ -369,14 +382,14 @@ DEPARTUREまたは手動RESET時にはtrack metadata cacheを無効化します�
 
 同一DFPWM chunkを全Speakerへ投入した後、全Speakerの `speaker_audio_empty` を待つバリア方式です。
 
-高priority requestによる割り込み時は全Speakerを `stop()` し、Playerの待機を専用eventで解除します。Minecraft/CC:Tweaked側を含むsample単位の完全同期は保証しません。
+高priority requestによる割り込み時は全Speakerを `stop()` し、Playerの待機を専用eventで解除します。pause待機中も同じ専用eventで即時中断します。Minecraft/CC:Tweaked側を含むsample単位の完全同期は保証しません。
 
 ## コード規約
 
 各Lua関数の直前には英語で機能を示すコメントを付けます。
 
 ```lua
--- function: Play an ordered list of audio segment files at one announcement priority.
+-- function: Play an ordered list of audio and pause items at one announcement priority.
 function Player:playSegments(segments, priority)
     ...
 end
