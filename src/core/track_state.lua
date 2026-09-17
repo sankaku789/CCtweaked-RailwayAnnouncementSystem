@@ -3,12 +3,8 @@ TrackState.__index = TrackState
 
 local transitions = {
     IDLE = {
-        state = "APPROACH",
-        event = "approach",
-    },
-    APPROACH = {
         state = "PLATFORM",
-        event = "platform",
+        event = "approach",
     },
     PLATFORM = {
         state = "IDLE",
