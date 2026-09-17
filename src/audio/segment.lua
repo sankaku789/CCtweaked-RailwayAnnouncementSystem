@@ -120,19 +120,27 @@ function Segment:_resolveTrainInfo(definition, context)
     return { classPath, destinationPath }
 end
 
--- function: Resolve approach train information followed by the arrival phrase.
-function Segment:_resolveApproachTrainInfo(definition, context)
+-- function: Resolve the complete metadata-based approach phrase as one audio run.
+function Segment:_resolveApproachTrainBlock(definition, context)
     local paths = self:_resolveTrainInfo(definition, context)
-    if not paths then
+    if not paths or not self:exists(definition.warningPath) then
         return nil
     end
 
-    if not self:exists(definition.arrivesPath) then
-        return nil
-    end
-
-    paths[#paths + 1] = definition.arrivesPath
+    paths[#paths + 1] = definition.warningPath
     return paths
+end
+
+-- function: Resolve the out-of-service approach phrase as one audio run.
+function Segment:_resolveOutOfServiceBlock(definition)
+    if not self:exists(definition.trainPath) or not self:exists(definition.warningPath) then
+        return nil
+    end
+
+    return {
+        definition.trainPath,
+        definition.warningPath,
+    }
 end
 
 -- function: Resolve route-specific optional segment IDs for the current announcement type.
@@ -185,8 +193,10 @@ function Segment:_resolveDynamic(definition, context)
         return self:_resolveTrack(definition, context)
     elseif definition.resolver == "train_info" then
         return self:_resolveTrainInfo(definition, context)
-    elseif definition.resolver == "approach_train_info" then
-        return self:_resolveApproachTrainInfo(definition, context)
+    elseif definition.resolver == "approach_train_block" then
+        return self:_resolveApproachTrainBlock(definition, context)
+    elseif definition.resolver == "out_of_service_block" then
+        return self:_resolveOutOfServiceBlock(definition)
     elseif definition.resolver == "route_options" then
         return self:_resolveRouteOptions(definition, context)
     end
