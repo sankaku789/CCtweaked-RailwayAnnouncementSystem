@@ -16,12 +16,19 @@ return {
         directory = "audio/track",
     },
 
-    approach_train_info = {
+    approach_train_block = {
         kind = "dynamic",
-        resolver = "approach_train_info",
+        resolver = "approach_train_block",
         classDirectory = "audio/class",
         destinationDirectory = "audio/destination",
-        arrivesPath = "audio/approach/arrives.dfpwm",
+        warningPath = "audio/approach/warning.dfpwm",
+    },
+
+    out_of_service_block = {
+        kind = "dynamic",
+        resolver = "out_of_service_block",
+        trainPath = "audio/approach/out_of_service_train.dfpwm",
+        warningPath = "audio/approach/warning.dfpwm",
     },
 
     train_info = {
@@ -39,27 +46,6 @@ return {
     train = {
         kind = "file",
         path = "audio/approach/train.dfpwm",
-    },
-
-    out_of_service_train = {
-        kind = "file",
-        path = "audio/approach/out_of_service_train.dfpwm",
-    },
-
-    arrives = {
-        kind = "file",
-        path = "audio/approach/arrives.dfpwm",
-    },
-
-    warning = {
-        kind = "file",
-        path = "audio/approach/warning.dfpwm",
-    },
-
-    arrival_melody = {
-        kind = "file",
-        path = "audio/arrival/melody.dfpwm",
-        enabled = "announcement.approach.arrivalMelodyEnabled",
     },
 
     passing_warning = {
