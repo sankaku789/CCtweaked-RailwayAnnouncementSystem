@@ -48,6 +48,12 @@ return {
         path = "audio/approach/train.dfpwm",
     },
 
+    arrival_melody = {
+        kind = "file",
+        path = "audio/arrival/melody.dfpwm",
+        enabled = "announcement.approach.arrivalMelodyEnabled",
+    },
+
     passing_warning = {
         kind = "file",
         path = "audio/passing/warning.dfpwm",
