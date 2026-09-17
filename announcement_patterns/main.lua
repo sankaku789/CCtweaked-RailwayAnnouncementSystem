@@ -4,9 +4,10 @@ return {
         "soon",
         "?track",
         "train_info|train",
-        "?route_options",
         "warning",
         "?arrival_melody",
+        "@pause:0.3",
+        "?route_options",
     },
 
     approach_out_of_service = {
@@ -14,9 +15,10 @@ return {
         "soon",
         "?track",
         "out_of_service_train",
-        "?route_options",
         "warning",
         "?arrival_melody",
+        "@pause:0.3",
+        "?route_options",
     },
 
     passing = {
@@ -25,6 +27,7 @@ return {
 
     departure = {
         "departure_melody",
+        "@pause:0.3",
         "?doors_closing",
     },
 
@@ -35,6 +38,7 @@ return {
     next_train = {
         "next_train_intro",
         "train_info|next_train_generic",
+        "@pause:1.0",
         "?route_options",
     },
 }

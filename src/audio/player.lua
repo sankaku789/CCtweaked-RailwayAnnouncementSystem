@@ -84,15 +84,59 @@ function Player:playFile(path)
     return true
 end
 
--- function: Play an ordered list of audio segment files at one announcement priority.
+-- function: Wait for a pattern pause while remaining responsive to announcement interrupts.
+function Player:_waitPause(seconds)
+    if self.interruptRequested then
+        return false, "interrupted"
+    end
+
+    seconds = tonumber(seconds) or 0
+    if seconds <= 0 then
+        return true
+    end
+
+    local timerId = os.startTimer(seconds)
+
+    while true do
+        local event, value = os.pullEvent()
+
+        if event == INTERRUPT_EVENT then
+            if type(os.cancelTimer) == "function" then
+                os.cancelTimer(timerId)
+            end
+            return false, "interrupted"
+        end
+
+        if event == "timer" and value == timerId then
+            return true
+        end
+    end
+end
+
+-- function: Play one audio or pause item from a composed announcement.
+function Player:_playItem(item)
+    if type(item) == "table" then
+        if item.kind == "pause" then
+            return self:_waitPause(item.seconds)
+        elseif item.kind == "audio" then
+            return self:playFile(item.path)
+        end
+
+        error("unknown playback item kind: " .. tostring(item.kind))
+    end
+
+    return self:playFile(item)
+end
+
+-- function: Play an ordered list of audio and pause items at one announcement priority.
 function Player:playSegments(segments, priority)
     self.currentPriority = tonumber(priority) or 0
     self.interruptRequested = false
 
     local completed = true
 
-    for _, path in ipairs(segments) do
-        local ok, reason = self:playFile(path)
+    for _, item in ipairs(segments) do
+        local ok, reason = self:_playItem(item)
         if not ok and reason == "interrupted" then
             completed = false
             break
