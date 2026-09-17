@@ -36,6 +36,11 @@ local PRESERVED_FILES = {
     "announcement_patterns/route_options.lua",
 }
 
+local REFRESHABLE_PATTERN_FILES = {
+    ["announcement_patterns/main.lua"] = true,
+    ["announcement_patterns/segments.lua"] = true,
+}
+
 local AUDIO_DIRECTORIES = {
     "audio/approach",
     "audio/arrival",
@@ -80,7 +85,22 @@ local LEGACY_PATTERN_FILES = {
 }
 
 local arguments = { ... }
-local ref = arguments[1] or DEFAULT_REF
+local ref = DEFAULT_REF
+local refConfigured = false
+local refreshPatterns = false
+
+for _, argument in ipairs(arguments) do
+    if argument == "--refresh-patterns" then
+        refreshPatterns = true
+    elseif argument:sub(1, 2) == "--" then
+        error("Unknown installer option: " .. argument)
+    elseif not refConfigured then
+        ref = argument
+        refConfigured = true
+    else
+        error("Unexpected installer argument: " .. argument)
+    end
+end
 
 -- function: Build a raw GitHub URL for one repository path.
 local function rawUrl(path)
@@ -213,13 +233,17 @@ local function removeLegacyLayout()
     end
 end
 
--- function: Install or update runtime sources while preserving station-specific announcement patterns and audio.
+-- function: Install or update runtime sources while preserving station-specific configuration and audio.
 local function install()
     if type(http) ~= "table" or type(http.get) ~= "function" then
         error("CC:Tweaked HTTP API is unavailable")
     end
 
     print(("Installing CCtweaked Railway Announcement System (%s)..."):format(ref))
+
+    if refreshPatterns then
+        print("Default announcement patterns will be refreshed.")
+    end
 
     migrateLegacyPatternFiles()
 
@@ -228,14 +252,19 @@ local function install()
     end
 
     for _, repositoryPath in ipairs(PRESERVED_FILES) do
-        downloadFile(repositoryPath, true)
+        local preserveExisting = not (refreshPatterns and REFRESHABLE_PATTERN_FILES[repositoryPath])
+        downloadFile(repositoryPath, preserveExisting)
     end
 
     createAudioDirectories()
     removeLegacyLayout()
 
     print("Installation complete.")
-    print("config.lua, announcement patterns, and existing audio files were preserved.")
+    if refreshPatterns then
+        print("config.lua, route options, and existing audio files were preserved.")
+    else
+        print("config.lua, announcement patterns, and existing audio files were preserved.")
+    end
 end
 
 install()
