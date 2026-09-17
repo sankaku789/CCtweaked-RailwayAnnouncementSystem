@@ -4,6 +4,7 @@ local INSTALL_ROOT = "/"
 
 local RUNTIME_FILES = {
     "startup.lua",
+    "import_audio.lua",
 
     "src/app.lua",
 
