@@ -193,7 +193,8 @@ function MtrAdapter:_requestMap(endpoint, requestBody, keepRouteIdsExact)
         error(("MTR %s response is not valid JSON"):format(endpoint))
     end
 
-    if tonumber(payload.status) ~= 200 then
+    local payloadStatus = tonumber(payload.status)
+    if payloadStatus ~= nil and payloadStatus ~= 200 then
         error(("MTR %s API returned status %s: %s"):format(
             endpoint,
             tostring(payload.status),
