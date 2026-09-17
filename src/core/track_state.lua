@@ -11,22 +11,15 @@ local transitions = {
         event = "platform",
     },
     PLATFORM = {
-        state = "DEPARTURE",
-        event = "departure",
-    },
-    DEPARTURE = {
         state = "IDLE",
-        event = "idle",
+        event = "departure",
     },
 }
 
 -- function: Create a track state machine starting from IDLE.
-function TrackState.new(options)
-    options = options or {}
-
+function TrackState.new(_options)
     return setmetatable({
         state = "IDLE",
-        autoResetAfterDeparture = options.autoResetAfterDeparture ~= false,
     }, TrackState)
 end
 
@@ -47,18 +40,11 @@ function TrackState:advance()
 
     self.state = transition.state
 
-    local result = {
+    return {
         previous = previous,
         state = self.state,
         event = transition.event,
     }
-
-    if self.state == "DEPARTURE" and self.autoResetAfterDeparture then
-        self.state = "IDLE"
-        result.resetTo = "IDLE"
-    end
-
-    return result
 end
 
 return TrackState
