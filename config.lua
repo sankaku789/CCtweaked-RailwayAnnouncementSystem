@@ -16,11 +16,6 @@ return {
         },
     },
 
-    state = {
-        -- The third NEXT pulse enters DEPARTURE and then returns to IDLE.
-        autoResetAfterDeparture = true,
-    },
-
     queue = {
         -- Requests at or above this priority interrupt lower-priority playback.
         preemptPriority = 100,
