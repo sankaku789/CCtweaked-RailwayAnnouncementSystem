@@ -2,7 +2,78 @@
 
 CC:Tweaked向けの鉄道自動放送システムです。
 
-「1線 = 1 Computer」を前提に、停車列車の状態管理、通過列車、MTR metadata、定期放送、複数Speaker再生を分離して扱います。
+「1線 = 1 Computer」を前提に、停車列車の状態管理、通過列車、MTR metadata、Route別オプション放送、定期放送、複数Speaker再生を分離して扱います。
+
+## インストール
+
+リポジトリをpublicにした後、CC:Tweaked上で次を実行します。
+
+```text
+wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncementSystem/main/install.lua
+```
+
+同じコマンドを再実行するとruntime sourceを更新します。既存の `config.lua`、`data/`、DFPWM音声ファイルは保持します。
+
+旧レイアウトから更新した場合は、新しい `src/` を配置した後に旧 `adapter/`、`core/`、`hardware/` などのcode directoryを削除します。
+
+## ディレクトリ構成
+
+```text
+startup.lua
+config.lua
+install.lua
+
+data/
+  patterns.lua
+  segments.lua
+  route_options.lua
+
+src/
+  app.lua
+  adapter/
+    none.lua
+    mtr.lua
+  audio/
+    player.lua
+    segment.lua
+  core/
+    track_state.lua
+    announcement_queue.lua
+    composer.lua
+    scheduler.lua
+  hardware/
+    railway_input.lua
+    redstone_input.lua
+    speakers.lua
+  metadata/
+    cache.lua
+    provider.lua
+  util/
+    log.lua
+
+audio/
+  approach/
+  arrival/
+  departure/
+  passing/
+  stopped/
+  next_train/
+  track/
+  class/
+  destination/
+  options/
+```
+
+役割:
+
+```text
+config.lua  -> このComputer固有の設定
+data/       -> 放送定義とRoute別設定
+src/        -> 実行ロジック
+audio/      -> DFPWM音声アセット
+```
+
+`startup.lua` が `/src/?.lua` を `package.path` に追加するため、`src/` 内部では従来通り `require("core.scheduler")` のように参照できます。
 
 ## 入力
 
@@ -19,13 +90,11 @@ Normal Redstone (back)
 
 `NEXT` は停車列車用の状態機械を1段進めます。
 `PASSING` は状態を変更せず、通過放送を直接Queueへ投入します。
-`RESET` はComputerへ直付けした通常Redstone buttonの立ち上がりで、状態を `IDLE` に戻します。
+`RESET` は状態を `IDLE` に戻します。
 
 色と面は `config.lua` の `input` で変更できます。
 
 ## 停車列車の状態遷移
-
-`NEXT` の立ち上がりごとに以下の順で進みます。
 
 ```text
 IDLE
@@ -35,7 +104,7 @@ IDLE
   -> IDLE
 ```
 
-デフォルトではDEPARTUREイベント生成後に自動でIDLEへ戻るため、1列車あたり3パルスです。
+デフォルトでは1列車あたり3回の `NEXT` パルスです。
 
 - 1パルス目: 接近放送
 - 2パルス目: PLATFORM状態へ遷移
@@ -44,8 +113,6 @@ IDLE
 `PASSING` はこの状態遷移には入りません。
 
 ## 優先度と割り込み
-
-QueueはFIFOではなく、`priority` の高いrequestを先に処理します。同一priorityでは古いrequestが先です。
 
 既定priority:
 
@@ -59,13 +126,11 @@ QueueはFIFOではなく、`priority` の高いrequestを先に処理します�
 
 `queue.preemptPriority` 以上のrequestが来た場合、低priorityの待機中requestを破棄し、低priority放送を再生中ならSpeakerを停止して高priority放送へ切り替えます。
 
-中断された定期放送は途中から再開しません。次の周期まで待ちます。
+中断された定期放送は途中から再開しません。
 
 ## 定期放送
 
-`config.lua` の `periodic` で状態別の定期放送を設定できます。
-
-既定では音声アセット未配置時の連続警告を避けるためOFFです。
+`config.lua` の `periodic` で設定します。既定では音声アセット未配置時の連続警告を避けるためOFFです。
 
 ```lua
 periodic = {
@@ -89,11 +154,9 @@ periodic = {
 }
 ```
 
-`stopped` は `PLATFORM` 中、`next_train` は `IDLE` 中だけ繰り返します。状態が変わると待機中の定期放送は破棄され、タイマーも新しい状態用にリセットされます。
-
 ## 放送パターン
 
-放送順は `announcement/patterns.lua` に宣言します。
+放送順は `data/patterns.lua` に宣言します。
 
 ```lua
 return {
@@ -102,35 +165,15 @@ return {
         "soon",
         "?track",
         "train_info|train",
+        "?route_options",
         "warning",
         "?arrival_melody",
-    },
-
-    approach_out_of_service = {
-        "?approach_melody",
-        "soon",
-        "?track",
-        "out_of_service_train",
-        "warning",
-        "?arrival_melody",
-    },
-
-    passing = {
-        "passing_warning",
-    },
-
-    departure = {
-        "departure_melody",
-        "?doors_closing",
-    },
-
-    stopped = {
-        "stopped_notice",
     },
 
     next_train = {
         "next_train_intro",
         "train_info|next_train_generic",
+        "?route_options",
     },
 }
 ```
@@ -138,27 +181,99 @@ return {
 記法:
 
 ```text
-segment
-    必須セグメント
-
-?segment
-    optional。解決できない場合はskip
-
-primary|fallback
-    primaryが再生可能ならprimary、解決できなければfallback
+segment          必須セグメント
+?segment         optional。解決できない場合はskip
+primary|fallback primaryが解決できなければfallback
 ```
 
-## 回送列車
+## セグメント定義
 
-MTR AdapterはTransport Simulation CoreのArrivalResponseにある `isTerminating` を `metadata.terminating` として返します。
+セグメントIDと実ファイル・dynamic resolverの対応は `data/segments.lua` に定義します。
+
+```lua
+track = {
+    kind = "dynamic",
+    resolver = "track",
+    directory = "audio/track",
+},
+
+train_info = {
+    kind = "dynamic",
+    resolver = "train_info",
+    classDirectory = "audio/class",
+    destinationDirectory = "audio/destination",
+},
+
+route_options = {
+    kind = "dynamic",
+    resolver = "route_options",
+},
+```
+
+Route別に使う追加音声も通常のセグメントとして `data/segments.lua` に定義します。
+
+```lua
+airport_access = {
+    kind = "file",
+    path = "audio/options/airport_access.dfpwm",
+},
+```
+
+## Route別オプション放送
+
+MTR AdapterはTSC ArrivalResponseの `routeId` をmetadataへ追加します。
 
 ```lua
 {
     class = "rapid",
-    destination = "sapporo",
-    terminating = true,
+    destination = "new_chitose_airport",
+    terminating = false,
+    routeId = "1234567890123456789",
 }
 ```
+
+TSCのRoute IDは64bit整数なので、MTR AdapterはJSON decode前に `routeId` をdecimal stringへ変換し、Lua numberの精度損失を避けます。
+
+Routeごとの追加放送は `data/route_options.lua` にセグメントIDだけを書きます。
+
+```lua
+return {
+    ["1234567890123456789"] = {
+        approach = {
+            "airport_access",
+            "reserved_seat",
+        },
+
+        next_train = {
+            "airport_access",
+        },
+    },
+}
+```
+
+処理順:
+
+```text
+MTR ArrivalResponse
+  -> routeIdを文字列で保持
+  -> data/route_options.lua[routeId]
+  -> request.type (approach / next_train / ...)
+  -> segment ID一覧
+  -> data/segments.lua
+  -> DFPWM file
+```
+
+`?route_options` なので、Route IDがない、未登録、対象放送種別の設定がない場合は何も追加せずskipします。
+
+MTR metadataを新規取得したときはRoute ID確認用に次の形式でログを出します。
+
+```text
+[12:34 PM] : Metadata -> routeId=1234567890123456789 class=rapid destination=new_chitose_airport
+```
+
+## 回送列車
+
+MTR AdapterはTSC ArrivalResponseの `isTerminating` を `metadata.terminating` として返します。
 
 通常の `approach` requestでも `terminating == true` ならComposerが `approach_out_of_service` を選択します。
 
@@ -179,40 +294,6 @@ CC Computer
         ↓
 passing announcement
 ```
-
-通過信号は停車列車の `IDLE -> APPROACH -> PLATFORM -> DEPARTURE` 状態を変更しません。
-
-## セグメント定義
-
-セグメントIDと実ファイル・動的Resolverの対応は `announcement/segments.lua` に定義します。
-
-固定ファイル:
-
-```lua
-passing_warning = {
-    kind = "file",
-    path = "audio/passing/warning.dfpwm",
-},
-```
-
-動的セグメント:
-
-```lua
-track = {
-    kind = "dynamic",
-    resolver = "track",
-    directory = "audio/track",
-},
-
-train_info = {
-    kind = "dynamic",
-    resolver = "train_info",
-    classDirectory = "audio/class",
-    destinationDirectory = "audio/destination",
-},
-```
-
-`train_info` は種別と行先の両ファイルが存在するときだけ2ファイルを返します。
 
 ## 音声ファイル
 
@@ -239,21 +320,16 @@ audio/
 │  ├─ intro.dfpwm
 │  └─ generic.dfpwm
 ├─ track/
-│  ├─ 1.dfpwm
-│  ├─ 2.dfpwm
-│  └─ ...
 ├─ class/
-│  ├─ rapid.dfpwm
-│  ├─ limited_express.dfpwm
-│  └─ ...
-└─ destination/
-   ├─ sapporo.dfpwm
-   └─ ...
+├─ destination/
+└─ options/
 ```
+
+`audio/options/` はRoute別追加放送などのユーザー定義セグメント向けです。
 
 ## Metadata Adapter
 
-CoreはMTR/Create固有APIを直接参照しません。
+CoreはMTR固有APIを直接参照しません。
 
 MTR Adapterは `/mtr/api/map/arrivals` から対象ホームの次列車1件を取得し、以下を使用します。
 
@@ -261,9 +337,10 @@ MTR Adapterは `/mtr/api/map/arrivals` から対象ホームの次列車1件を�
 routeNumber   -> class
 destination   -> destination
 isTerminating -> terminating
+routeId       -> routeId (decimal string)
 ```
 
-MTR側の名称は `日本語|English` の右側を使用し、小文字化して英数字以外の連続文字を `_` に正規化します。
+名称は `日本語|English` の右側を使用し、小文字化して英数字以外の連続文字を `_` に正規化します。
 
 ```text
 快速|Rapid           -> rapid
@@ -286,60 +363,21 @@ adapter = {
 }
 ```
 
-DEPARTUREまたは手動RESET時にはtrack metadata cacheを無効化し、その後の次列車案内が前列車のcacheを使い続けないようにします。
+DEPARTUREまたは手動RESET時にはtrack metadata cacheを無効化します。
 
 ## 複数Speakerと割り込み
 
 同一DFPWM chunkを全Speakerへ投入した後、全Speakerの `speaker_audio_empty` を待つバリア方式です。
 
-高priority requestによる割り込み時は全Speakerを `stop()` し、Playerの待機を専用eventで解除します。stop/retry後に残る古い `speaker_audio_empty` が次のchunk barrierへ混ざりにくいよう、再開前にeventをdrainします。
-
-Minecraft/CC:Tweaked側を含むsample単位の完全同期は保証しません。
+高priority requestによる割り込み時は全Speakerを `stop()` し、Playerの待機を専用eventで解除します。Minecraft/CC:Tweaked側を含むsample単位の完全同期は保証しません。
 
 ## コード規約
 
-各Lua関数の直前には、旧コードと同様に英語で機能を示すコメントを付けます。
+各Lua関数の直前には英語で機能を示すコメントを付けます。
 
 ```lua
 -- function: Play an ordered list of audio segment files at one announcement priority.
 function Player:playSegments(segments, priority)
     ...
 end
-```
-
-## モジュール
-
-```text
-startup.lua
-app.lua
-config.lua
-
-announcement/
-  patterns.lua
-  segments.lua
-
-core/
-  track_state.lua
-  announcement_queue.lua
-  composer.lua
-  scheduler.lua
-
-hardware/
-  railway_input.lua
-  speakers.lua
-
-audio/
-  player.lua
-  segment.lua
-
-metadata/
-  cache.lua
-  provider.lua
-
-adapter/
-  none.lua
-  mtr.lua
-
-util/
-  log.lua
 ```

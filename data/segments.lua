@@ -23,6 +23,11 @@ return {
         destinationDirectory = "audio/destination",
     },
 
+    route_options = {
+        kind = "dynamic",
+        resolver = "route_options",
+    },
+
     train = {
         kind = "file",
         path = "audio/approach/train.dfpwm",

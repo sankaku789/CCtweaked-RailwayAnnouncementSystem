@@ -1,6 +1,7 @@
 local config = require("config")
-local announcementPatterns = require("announcement.patterns")
-local segmentDefinitions = require("announcement.segments")
+local announcementPatterns = require("data.patterns")
+local segmentDefinitions = require("data.segments")
+local routeOptions = require("data.route_options")
 
 local log = require("util.log")
 local RailwayInput = require("hardware.railway_input")
@@ -45,7 +46,7 @@ function app.run()
     local speakers = Speakers.connect(config.speaker, log)
     local trackState = TrackState.new(config.state)
     local queue = Queue.new()
-    local resolver = Segment.new(config, segmentDefinitions)
+    local resolver = Segment.new(config, segmentDefinitions, routeOptions)
     local composer = Composer.new(announcementPatterns, resolver)
     local player = Player.new(speakers, log)
 

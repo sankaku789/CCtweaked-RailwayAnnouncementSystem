@@ -4,6 +4,7 @@ return {
         "soon",
         "?track",
         "train_info|train",
+        "?route_options",
         "warning",
         "?arrival_melody",
     },
@@ -13,6 +14,7 @@ return {
         "soon",
         "?track",
         "out_of_service_train",
+        "?route_options",
         "warning",
         "?arrival_melody",
     },
@@ -33,5 +35,6 @@ return {
     next_train = {
         "next_train_intro",
         "train_info|next_train_generic",
+        "?route_options",
     },
 }

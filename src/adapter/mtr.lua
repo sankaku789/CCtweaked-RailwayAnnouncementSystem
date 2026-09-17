@@ -90,6 +90,17 @@ local function readResponse(response)
     return body
 end
 
+-- function: Preserve MTR route IDs as exact decimal strings before JSON decoding.
+local function preserveRouteIds(raw)
+    if type(raw) ~= "string" then
+        return raw
+    end
+
+    return raw:gsub('("routeId"%s*:%s*)(%-?%d+)', function(prefix, routeId)
+        return prefix .. '"' .. routeId .. '"'
+    end)
+end
+
 -- function: Create an MTR metadata adapter.
 function MtrAdapter.new(options)
     options = options or {}
@@ -143,7 +154,7 @@ function MtrAdapter:_requestArrival()
         error("MTR arrivals request failed: " .. tostring(requestError))
     end
 
-    local raw = readResponse(response)
+    local raw = preserveRouteIds(readResponse(response))
     local payload = textutils.unserializeJSON(raw)
 
     if type(payload) ~= "table" then
@@ -165,7 +176,7 @@ function MtrAdapter:_requestArrival()
     return data.arrivals[1]
 end
 
--- function: Return normalized train metadata and terminating status for the next MTR arrival.
+-- function: Return normalized train metadata, route ID, and terminating status for the next MTR arrival.
 function MtrAdapter:getMetadata(_context)
     local arrival = self:_requestArrival()
     if not arrival then
@@ -175,8 +186,13 @@ function MtrAdapter:getMetadata(_context)
     local classId = normalizeAssetId(arrival.routeNumber)
     local destinationId = normalizeAssetId(arrival.destination)
     local terminating = arrival.isTerminating == true
+    local routeId = type(arrival.routeId) == "string" and trim(arrival.routeId) or nil
 
-    if not classId and not destinationId and not terminating then
+    if routeId == "" then
+        routeId = nil
+    end
+
+    if not classId and not destinationId and not terminating and not routeId then
         return nil
     end
 
@@ -184,6 +200,7 @@ function MtrAdapter:getMetadata(_context)
         class = classId,
         destination = destinationId,
         terminating = terminating,
+        routeId = routeId,
     }
 end
 

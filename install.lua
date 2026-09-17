@@ -2,33 +2,37 @@ local REPOSITORY = "sankaku789/CCtweaked-RailwayAnnouncementSystem"
 local DEFAULT_REF = "main"
 local INSTALL_ROOT = "/"
 
-local PROGRAM_FILES = {
+local RUNTIME_FILES = {
     "startup.lua",
-    "app.lua",
+
+    "src/app.lua",
+
+    "src/adapter/mtr.lua",
+    "src/adapter/none.lua",
+
+    "src/audio/player.lua",
+    "src/audio/segment.lua",
+
+    "src/core/announcement_queue.lua",
+    "src/core/composer.lua",
+    "src/core/scheduler.lua",
+    "src/core/track_state.lua",
+
+    "src/hardware/railway_input.lua",
+    "src/hardware/redstone_input.lua",
+    "src/hardware/speakers.lua",
+
+    "src/metadata/cache.lua",
+    "src/metadata/provider.lua",
+
+    "src/util/log.lua",
+}
+
+local PRESERVED_FILES = {
     "config.lua",
-
-    "adapter/mtr.lua",
-    "adapter/none.lua",
-
-    "announcement/patterns.lua",
-    "announcement/segments.lua",
-
-    "audio/player.lua",
-    "audio/segment.lua",
-
-    "core/announcement_queue.lua",
-    "core/composer.lua",
-    "core/scheduler.lua",
-    "core/track_state.lua",
-
-    "hardware/railway_input.lua",
-    "hardware/redstone_input.lua",
-    "hardware/speakers.lua",
-
-    "metadata/cache.lua",
-    "metadata/provider.lua",
-
-    "util/log.lua",
+    "data/patterns.lua",
+    "data/segments.lua",
+    "data/route_options.lua",
 }
 
 local AUDIO_DIRECTORIES = {
@@ -41,6 +45,22 @@ local AUDIO_DIRECTORIES = {
     "audio/track",
     "audio/class",
     "audio/destination",
+    "audio/options",
+}
+
+local LEGACY_FILES = {
+    "app.lua",
+    "audio/player.lua",
+    "audio/segment.lua",
+}
+
+local LEGACY_DIRECTORIES = {
+    "adapter",
+    "announcement",
+    "core",
+    "hardware",
+    "metadata",
+    "util",
 }
 
 local arguments = { ... }
@@ -76,11 +96,11 @@ local function ensureParent(path)
     end
 end
 
--- function: Download one text file from GitHub and replace the local copy atomically.
-local function downloadFile(repositoryPath)
+-- function: Download one text file from GitHub and optionally preserve an existing local copy.
+local function downloadFile(repositoryPath, preserveExisting)
     local target = targetPath(repositoryPath)
 
-    if repositoryPath == "config.lua" and fs.exists(target) then
+    if preserveExisting and fs.exists(target) then
         print("Keep -> " .. repositoryPath)
         return
     end
@@ -131,7 +151,26 @@ local function createAudioDirectories()
     end
 end
 
--- function: Install or update all runtime source files while preserving local configuration and audio.
+-- function: Remove source files left behind by the pre-src directory layout.
+local function removeLegacyLayout()
+    for _, repositoryPath in ipairs(LEGACY_FILES) do
+        local path = targetPath(repositoryPath)
+        if fs.exists(path) and not fs.isDir(path) then
+            fs.delete(path)
+            print("Remove legacy -> " .. repositoryPath)
+        end
+    end
+
+    for _, repositoryPath in ipairs(LEGACY_DIRECTORIES) do
+        local path = targetPath(repositoryPath)
+        if fs.exists(path) and fs.isDir(path) then
+            fs.delete(path)
+            print("Remove legacy -> " .. repositoryPath .. "/")
+        end
+    end
+end
+
+-- function: Install or update runtime sources while preserving station-specific data and audio.
 local function install()
     if type(http) ~= "table" or type(http.get) ~= "function" then
         error("CC:Tweaked HTTP API is unavailable")
@@ -139,14 +178,19 @@ local function install()
 
     print(("Installing CCtweaked Railway Announcement System (%s)..."):format(ref))
 
-    for _, repositoryPath in ipairs(PROGRAM_FILES) do
-        downloadFile(repositoryPath)
+    for _, repositoryPath in ipairs(RUNTIME_FILES) do
+        downloadFile(repositoryPath, false)
+    end
+
+    for _, repositoryPath in ipairs(PRESERVED_FILES) do
+        downloadFile(repositoryPath, true)
     end
 
     createAudioDirectories()
+    removeLegacyLayout()
 
     print("Installation complete.")
-    print("config.lua and existing audio files were preserved.")
+    print("config.lua, data files, and existing audio files were preserved.")
 end
 
 install()

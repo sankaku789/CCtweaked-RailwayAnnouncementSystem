@@ -32,11 +32,23 @@ local function readConfigPath(root, path)
     return value
 end
 
+-- function: Append resolved segment paths to an output list.
+local function appendAll(output, paths)
+    if not paths then
+        return
+    end
+
+    for _, path in ipairs(paths) do
+        output[#output + 1] = path
+    end
+end
+
 -- function: Create a semantic announcement segment resolver.
-function Segment.new(config, definitions)
+function Segment.new(config, definitions, routeOptions)
     return setmetatable({
         config = config or {},
         definitions = definitions or {},
+        routeOptions = routeOptions or {},
     }, Segment)
 end
 
@@ -108,12 +120,58 @@ function Segment:_resolveTrainInfo(definition, context)
     return { classPath, destinationPath }
 end
 
+-- function: Resolve route-specific optional segment IDs for the current announcement type.
+function Segment:_resolveRouteOptions(_definition, context)
+    local request = context and context.request or nil
+    local metadata = context and context.metadata or nil
+
+    if type(request) ~= "table" or type(metadata) ~= "table" then
+        return nil
+    end
+
+    local routeId = metadata.routeId
+    if type(routeId) ~= "string" or routeId == "" then
+        return nil
+    end
+
+    local routeDefinition = self.routeOptions[routeId]
+    if type(routeDefinition) ~= "table" then
+        return nil
+    end
+
+    local segmentIds = routeDefinition[request.type]
+    if type(segmentIds) ~= "table" then
+        return nil
+    end
+
+    local output = {}
+    for _, segmentId in ipairs(segmentIds) do
+        if type(segmentId) ~= "string" or segmentId == "" then
+            error("route option segment ID must be a non-empty string")
+        end
+
+        if segmentId == "route_options" then
+            error("route_options cannot include itself")
+        end
+
+        appendAll(output, self:resolve(segmentId, context, true))
+    end
+
+    if #output == 0 then
+        return nil
+    end
+
+    return output
+end
+
 -- function: Resolve a named dynamic segment into audio file paths.
 function Segment:_resolveDynamic(definition, context)
     if definition.resolver == "track" then
         return self:_resolveTrack(definition, context)
     elseif definition.resolver == "train_info" then
         return self:_resolveTrainInfo(definition, context)
+    elseif definition.resolver == "route_options" then
+        return self:_resolveRouteOptions(definition, context)
     end
 
     error("unknown dynamic segment resolver: " .. tostring(definition.resolver))

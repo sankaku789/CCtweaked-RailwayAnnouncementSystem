@@ -37,6 +37,14 @@ function Provider:get(context)
 
     if metadata then
         self.cache:set(key, metadata)
+
+        if self.logger and type(self.logger.event) == "function" and metadata.routeId then
+            self.logger.event("Metadata", ("routeId=%s class=%s destination=%s"):format(
+                tostring(metadata.routeId),
+                tostring(metadata.class),
+                tostring(metadata.destination)
+            ))
+        end
     end
 
     return metadata
