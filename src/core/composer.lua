@@ -90,11 +90,13 @@ local function parseEntry(entry)
     }
 end
 
--- function: Create an announcement composer from declarative patterns.
-function Composer.new(patterns, resolver)
+-- function: Create an announcement composer from declarative patterns and named composites.
+function Composer.new(patterns, resolver, composites, routeOptions)
     return setmetatable({
         patterns = patterns or {},
         resolver = resolver,
+        composites = composites or {},
+        routeOptions = routeOptions or {},
     }, Composer)
 end
 
@@ -111,8 +113,108 @@ function Composer:_patternName(request, metadata)
     return request.type
 end
 
+-- function: Resolve a named composite only when every required entry can be played.
+function Composer:_resolveComposite(id, definition, context, resolving)
+    if type(definition) ~= "table" then
+        error("announcement composite must be a table: " .. tostring(id))
+    end
+
+    if resolving[id] then
+        error("recursive announcement composite: " .. tostring(id))
+    end
+
+    resolving[id] = true
+
+    local output = {}
+    for _, entry in ipairs(definition) do
+        local items, parsed = self:_resolveEntry(entry, context, true, resolving)
+        if items then
+            appendAll(output, items)
+        elseif not parsed.optional then
+            resolving[id] = nil
+            return nil
+        end
+    end
+
+    resolving[id] = nil
+    if #output == 0 then
+        return nil
+    end
+
+    return output
+end
+
+-- function: Resolve route-specific optional symbols for the current announcement type.
+function Composer:_resolveRouteOptions(context, resolving)
+    local request = context and context.request or nil
+    local metadata = context and context.metadata or nil
+
+    if type(request) ~= "table" or type(metadata) ~= "table" then
+        return nil
+    end
+
+    local routeId = metadata.routeId
+    if type(routeId) ~= "string" or routeId == "" then
+        return nil
+    end
+
+    local routeDefinition = self.routeOptions[routeId]
+    if type(routeDefinition) ~= "table" then
+        return nil
+    end
+
+    local symbolIds = routeDefinition[request.type]
+    if type(symbolIds) ~= "table" then
+        return nil
+    end
+
+    if resolving.route_options then
+        error("recursive announcement composite: route_options")
+    end
+
+    resolving.route_options = true
+
+    local output = {}
+    for _, symbolId in ipairs(symbolIds) do
+        if type(symbolId) ~= "string" or symbolId == "" then
+            error("route option symbol ID must be a non-empty string")
+        end
+
+        if symbolId == "route_options" then
+            error("route_options cannot include itself")
+        end
+
+        appendAll(output, self:_resolveSymbol(symbolId, context, true, resolving))
+    end
+
+    resolving.route_options = nil
+    if #output == 0 then
+        return nil
+    end
+
+    return output
+end
+
+-- function: Resolve one segment, composite, or route-options symbol into playback items.
+function Composer:_resolveSymbol(id, context, requirePlayable, resolving)
+    if type(self.resolver.has) == "function" and self.resolver:has(id) then
+        return self.resolver:resolve(id, context, requirePlayable)
+    end
+
+    local composite = self.composites[id]
+    if composite ~= nil then
+        return self:_resolveComposite(id, composite, context, resolving)
+    end
+
+    if id == "route_options" then
+        return self:_resolveRouteOptions(context, resolving)
+    end
+
+    return self.resolver:resolve(id, context, requirePlayable)
+end
+
 -- function: Resolve one pattern entry into zero or more playback items.
-function Composer:_resolveEntry(entry, context)
+function Composer:_resolveEntry(entry, context, requirePlayable, resolving)
     local parsed = parseEntry(entry)
 
     if parsed.kind == "pause" then
@@ -121,19 +223,31 @@ function Composer:_resolveEntry(entry, context)
                 kind = "pause",
                 seconds = parsed.seconds,
             },
-        }
+        }, parsed
     end
 
     if parsed.fallback then
-        local primary = self.resolver:resolve(parsed.primary, context, true)
+        local primary = self:_resolveSymbol(parsed.primary, context, true, resolving)
         if primary then
-            return primary
+            return primary, parsed
         end
 
-        return self.resolver:resolve(parsed.fallback, context, parsed.optional)
+        local fallback = self:_resolveSymbol(
+            parsed.fallback,
+            context,
+            requirePlayable or parsed.optional,
+            resolving
+        )
+        return fallback, parsed
     end
 
-    return self.resolver:resolve(parsed.primary, context, parsed.optional)
+    local items = self:_resolveSymbol(
+        parsed.primary,
+        context,
+        requirePlayable or parsed.optional,
+        resolving
+    )
+    return items, parsed
 end
 
 -- function: Compose audio and pause items for an announcement request.
@@ -150,8 +264,10 @@ function Composer:compose(request, metadata)
     }
 
     local output = {}
+    local resolving = {}
     for _, entry in ipairs(pattern) do
-        appendAll(output, self:_resolveEntry(entry, context))
+        local items = self:_resolveEntry(entry, context, false, resolving)
+        appendAll(output, items)
     end
 
     return trimBoundaryPauses(output)

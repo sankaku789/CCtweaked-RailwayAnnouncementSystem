@@ -32,12 +32,14 @@ local RUNTIME_FILES = {
 local PRESERVED_FILES = {
     "config.lua",
     "announcement_patterns/main.lua",
+    "announcement_patterns/composites.lua",
     "announcement_patterns/segments.lua",
     "announcement_patterns/route_options.lua",
 }
 
 local REFRESHABLE_PATTERN_FILES = {
     ["announcement_patterns/main.lua"] = true,
+    ["announcement_patterns/composites.lua"] = true,
     ["announcement_patterns/segments.lua"] = true,
 }
 

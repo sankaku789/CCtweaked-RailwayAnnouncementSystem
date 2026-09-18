@@ -32,24 +32,18 @@ local function readConfigPath(root, path)
     return value
 end
 
--- function: Append resolved segment paths to an output list.
-local function appendAll(output, paths)
-    if not paths then
-        return
-    end
-
-    for _, path in ipairs(paths) do
-        output[#output + 1] = path
-    end
-end
-
 -- function: Create a semantic announcement segment resolver.
-function Segment.new(config, definitions, routeOptions)
+function Segment.new(config, definitions)
     return setmetatable({
         config = config or {},
         definitions = definitions or {},
-        routeOptions = routeOptions or {},
     }, Segment)
+end
+
+-- function: Check whether a named segment is defined by the segment table.
+function Segment:has(id)
+    local definition = self.definitions[id]
+    return type(definition) == "string" or type(definition) == "table"
 end
 
 -- function: Check whether an audio file exists and is not a directory.
@@ -117,6 +111,21 @@ function Segment:_resolveTrack(definition, context)
     return nil
 end
 
+-- function: Resolve a train-class audio variant from train metadata.
+function Segment:_resolveClass(definition, context)
+    local metadata = context and context.metadata or nil
+    if type(metadata) ~= "table" then
+        return nil
+    end
+
+    local path = self:fromId(definition.directory, metadata.class)
+    if path then
+        return { path }
+    end
+
+    return nil
+end
+
 -- function: Resolve a destination-based audio variant from train metadata.
 function Segment:_resolveDestination(definition, context)
     local metadata = context and context.metadata or nil
@@ -132,126 +141,14 @@ function Segment:_resolveDestination(definition, context)
     return nil
 end
 
--- function: Resolve optional intro, track, and prefix audio followed by class and destination train information.
-function Segment:_resolveTrainInfo(definition, context)
-    local request = context and context.request or nil
-    local metadata = context and context.metadata or nil
-    if type(metadata) ~= "table" then
-        return nil
-    end
-
-    local introPath = definition.introPath
-    if introPath ~= nil then
-        if type(introPath) ~= "string" or introPath == "" then
-            error("train_info introPath must be a non-empty string")
-        end
-
-        if not self:exists(introPath) then
-            return nil
-        end
-    end
-
-    local trackPath = nil
-    local trackDirectory = definition.trackDirectory
-    if trackDirectory ~= nil then
-        if type(trackDirectory) ~= "string" or trackDirectory == "" then
-            error("train_info trackDirectory must be a non-empty string")
-        end
-
-        trackPath = self:fromId(trackDirectory, request and request.track or nil)
-        if not trackPath then
-            return nil
-        end
-    end
-
-    local prefixPath = definition.prefixPath
-    if prefixPath ~= nil then
-        if type(prefixPath) ~= "string" or prefixPath == "" then
-            error("train_info prefixPath must be a non-empty string")
-        end
-
-        if not self:exists(prefixPath) then
-            return nil
-        end
-    end
-
-    local classPath = self:fromId(definition.classDirectory, metadata.class)
-    local destinationPath = self:fromId(definition.destinationDirectory, metadata.destination)
-
-    if not classPath or not destinationPath then
-        return nil
-    end
-
-    local output = {}
-    if introPath then
-        output[#output + 1] = introPath
-    end
-    if trackPath then
-        output[#output + 1] = trackPath
-    end
-    if prefixPath then
-        output[#output + 1] = prefixPath
-    end
-    output[#output + 1] = classPath
-    output[#output + 1] = destinationPath
-
-    return output
-end
-
--- function: Resolve route-specific optional segment IDs for the current announcement type.
-function Segment:_resolveRouteOptions(_definition, context)
-    local request = context and context.request or nil
-    local metadata = context and context.metadata or nil
-
-    if type(request) ~= "table" or type(metadata) ~= "table" then
-        return nil
-    end
-
-    local routeId = metadata.routeId
-    if type(routeId) ~= "string" or routeId == "" then
-        return nil
-    end
-
-    local routeDefinition = self.routeOptions[routeId]
-    if type(routeDefinition) ~= "table" then
-        return nil
-    end
-
-    local segmentIds = routeDefinition[request.type]
-    if type(segmentIds) ~= "table" then
-        return nil
-    end
-
-    local output = {}
-    for _, segmentId in ipairs(segmentIds) do
-        if type(segmentId) ~= "string" or segmentId == "" then
-            error("route option segment ID must be a non-empty string")
-        end
-
-        if segmentId == "route_options" then
-            error("route_options cannot include itself")
-        end
-
-        appendAll(output, self:resolve(segmentId, context, true))
-    end
-
-    if #output == 0 then
-        return nil
-    end
-
-    return output
-end
-
 -- function: Resolve a named dynamic segment into audio file paths.
 function Segment:_resolveDynamic(definition, context)
     if definition.resolver == "track" then
         return self:_resolveTrack(definition, context)
+    elseif definition.resolver == "class" then
+        return self:_resolveClass(definition, context)
     elseif definition.resolver == "destination" then
         return self:_resolveDestination(definition, context)
-    elseif definition.resolver == "train_info" then
-        return self:_resolveTrainInfo(definition, context)
-    elseif definition.resolver == "route_options" then
-        return self:_resolveRouteOptions(definition, context)
     end
 
     error("unknown dynamic segment resolver: " .. tostring(definition.resolver))
@@ -260,6 +157,14 @@ end
 -- function: Resolve a semantic segment ID into one or more audio file paths.
 function Segment:resolve(id, context, requirePlayable)
     local definition = self.definitions[id]
+    if type(definition) == "string" then
+        if requirePlayable and not self:exists(definition) then
+            return nil
+        end
+
+        return { definition }
+    end
+
     if type(definition) ~= "table" then
         error("unknown announcement segment: " .. tostring(id))
     end
@@ -268,7 +173,13 @@ function Segment:resolve(id, context, requirePlayable)
         return nil
     end
 
-    if definition.kind == "file" then
+    local hasPath = definition.path ~= nil
+    local hasResolver = definition.resolver ~= nil
+    if hasPath == hasResolver then
+        error("segment definition must configure exactly one of path or resolver: " .. tostring(id))
+    end
+
+    if hasPath then
         if type(definition.path) ~= "string" or definition.path == "" then
             error("segment file path is not configured: " .. tostring(id))
         end
@@ -278,11 +189,9 @@ function Segment:resolve(id, context, requirePlayable)
         end
 
         return { definition.path }
-    elseif definition.kind == "dynamic" then
-        return self:_resolveDynamic(definition, context)
     end
 
-    error("unknown announcement segment kind: " .. tostring(definition.kind))
+    return self:_resolveDynamic(definition, context)
 end
 
 return Segment

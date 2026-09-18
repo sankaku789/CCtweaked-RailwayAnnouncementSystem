@@ -14,7 +14,7 @@ wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncem
 
 既存の `config.lua`、`announcement_patterns/`、Route別設定、DFPWM音声は保持されます。
 
-標準の `announcement_patterns/main.lua` と `announcement_patterns/segments.lua` も更新する場合:
+標準の `announcement_patterns/main.lua`、`announcement_patterns/composites.lua`、`announcement_patterns/segments.lua` も更新する場合:
 
 ```text
 wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncementSystem/main/install.lua --refresh-patterns
@@ -132,7 +132,7 @@ audio/station/tomita.dfpwm
 → 駅名単独。「富田」
 ```
 
-`approach_train_arrival` は `class + destination/mairimasu`、`train_info` は `class + destination/desu` を使います。
+`announcement_patterns/segments.lua` は直接音声へ解決するsegmentだけを定義します。複数segmentをまとめる `approach_train_arrival`、`train_info`、`stopped_train_info`、`next_train_info` は `announcement_patterns/composites.lua` に定義します。
 
 ### 番線音声
 
@@ -208,7 +208,7 @@ stopped = {
 }
 ```
 
-`stopped_train_info` は放送全体を一括で解決します。
+`stopped_train_info` composite は放送全体を一括で解決します。
 
 ```text
 audio/track/ni/<track>.dfpwm
@@ -255,7 +255,7 @@ next_train = {
 }
 ```
 
-`next_train_info` も放送全体を一括で解決します。
+`next_train_info` composite も放送全体を一括で解決します。
 
 ```text
 audio/next_train/intro.dfpwm
@@ -342,7 +342,7 @@ ffmpeg -i input.wav -ac 1 -ar 48000 -c:a dfpwm output.dfpwm
 
 ## Route別オプション放送
 
-`announcement_patterns/route_options.lua` にRoute IDと追加segment IDを設定します。
+`announcement_patterns/route_options.lua` にRoute IDと追加symbol IDを設定します。
 
 ```lua
 return {
@@ -353,6 +353,8 @@ return {
     },
 }
 ```
+
+追加symbolには `segments.lua` のsegmentまたは `composites.lua` のcompositeを指定できます。
 
 ## 優先度 / 割り込み
 
