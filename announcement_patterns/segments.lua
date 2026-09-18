@@ -22,7 +22,7 @@ return {
         classDirectory = "audio/class",
         destinationDirectory = "audio/destination",
         arrivalPath = "audio/approach/arrives.dfpwm",
-        arrivalOverlapSeconds = 0.35,
+        arrivalOverlapSeconds = 0.1,
     },
 
     train_info = {
