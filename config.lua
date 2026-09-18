@@ -63,7 +63,7 @@ return {
     },
 
     adapter = {
-        module = "none",
+        module = "mtr",
         cacheTtlMs = 30000,
 
         mtr = {
