@@ -42,11 +42,10 @@ local REFRESHABLE_PATTERN_FILES = {
 }
 
 local AUDIO_DIRECTORIES = {
+    "audio/melody",
     "audio/approach",
     "audio/approach/destination",
-    "audio/arrival",
     "audio/departure",
-    "audio/passing",
     "audio/stopped",
     "audio/next_train",
     "audio/track",
@@ -84,6 +83,30 @@ local LEGACY_PATTERN_FILES = {
         source = "data/route_options.lua",
         target = "announcement_patterns/route_options.lua",
     },
+}
+
+local LEGACY_AUDIO_FILES = {
+    {
+        source = "audio/approach/melody.dfpwm",
+        target = "audio/melody/approach.dfpwm",
+    },
+    {
+        source = "audio/arrival/melody.dfpwm",
+        target = "audio/melody/arrival.dfpwm",
+    },
+    {
+        source = "audio/departure/melody.dfpwm",
+        target = "audio/melody/departure.dfpwm",
+    },
+    {
+        source = "audio/passing/warning.dfpwm",
+        target = "audio/approach/passing_warning.dfpwm",
+    },
+}
+
+local LEGACY_AUDIO_DIRECTORIES = {
+    "audio/arrival",
+    "audio/passing",
 }
 
 local arguments = { ... }
@@ -208,6 +231,32 @@ local function migrateLegacyPatternFiles()
     end
 end
 
+-- function: Move legacy audio assets into the current directory layout without overwriting existing targets.
+local function migrateLegacyAudioFiles()
+    for _, mapping in ipairs(LEGACY_AUDIO_FILES) do
+        local source = targetPath(mapping.source)
+        local target = targetPath(mapping.target)
+
+        if fs.exists(source) and not fs.isDir(source) then
+            if fs.exists(target) then
+                print("Keep legacy audio -> " .. mapping.source)
+            else
+                ensureParent(target)
+                fs.move(source, target)
+                print(("Migrate audio -> %s -> %s"):format(mapping.source, mapping.target))
+            end
+        end
+    end
+
+    for _, repositoryPath in ipairs(LEGACY_AUDIO_DIRECTORIES) do
+        local path = targetPath(repositoryPath)
+        if fs.exists(path) and fs.isDir(path) and #fs.list(path) == 0 then
+            fs.delete(path)
+            print("Remove legacy audio dir -> " .. repositoryPath .. "/")
+        end
+    end
+end
+
 -- function: Create all directories reserved for DFPWM announcement assets.
 local function createAudioDirectories()
     for _, repositoryPath in ipairs(AUDIO_DIRECTORIES) do
@@ -248,6 +297,7 @@ local function install()
     end
 
     migrateLegacyPatternFiles()
+    migrateLegacyAudioFiles()
 
     for _, repositoryPath in ipairs(RUNTIME_FILES) do
         downloadFile(repositoryPath, false)

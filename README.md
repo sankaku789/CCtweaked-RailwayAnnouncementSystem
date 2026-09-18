@@ -22,6 +22,8 @@ wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncem
 
 `--refresh-patterns` でも `config.lua`、`announcement_patterns/route_options.lua`、DFPWM音声は保持されます。
 
+旧ディレクトリ構成のメロディ・通過警告音声がある場合、installerは新しい配置へ自動移行します。移行先に同名ファイルが既にある場合は上書きしません。
+
 ## 音声パック
 
 公開リポジトリにはDFPWM本体を置きません。`audio/` 以下の `.dfpwm` は `.gitignore` 対象です。
@@ -155,6 +157,34 @@ audio/station/tomita.dfpwm
 
 旧 `audio/approach_destination/` と `audio/destination_sentence/` は標準パターンでは使用しません。既存ファイルはinstallerでも削除しません。
 
+## メロディ
+
+メロディは放送種別のディレクトリへ分散させず、`audio/melody/` にまとめます。
+
+```text
+audio/melody/approach.dfpwm  -> 接近放送の冒頭
+audio/melody/arrival.dfpwm   -> 接近放送末尾の到着メロディ
+audio/melody/departure.dfpwm -> 発車放送
+```
+
+有効・無効は `config.lua` の `announcement.melody` で設定します。
+
+```lua
+announcement = {
+    melody = {
+        approachEnabled = true,
+        arrivalEnabled = false,
+        departureEnabled = true,
+    },
+
+    departure = {
+        doorsClosingEnabled = false,
+    },
+}
+```
+
+旧設定の `announcement.approach.melodyEnabled` と `announcement.approach.arrivalMelodyEnabled` も互換用fallbackとして読み取ります。旧configを保持したまま更新しても従来のON/OFF設定を引き継げます。
+
 ## 接近放送
 
 標準パターン:
@@ -208,6 +238,22 @@ audio/approach/train.dfpwm = 「列車がまいります。」
 
 fallback後も共通の `warning.dfpwm` を続けます。
 
+### 通過放送
+
+`passing` は状態を変えない独立イベントのままですが、音声assetは接近系として `audio/approach/` にまとめます。
+
+```text
+audio/approach/passing_warning.dfpwm
+```
+
+標準パターンは引き続き次のとおりです。
+
+```lua
+passing = {
+    "passing_warning",
+}
+```
+
 ## 次列車案内
 
 `next_train` の `train_info` は次の2ファイルへ解決します。
@@ -237,24 +283,23 @@ audio/destination/tomita.dfpwm = 「富田行きです。」
 
 ```text
 audio/
+├─ melody/
+│  ├─ approach.dfpwm
+│  ├─ arrival.dfpwm
+│  └─ departure.dfpwm
 ├─ approach/
-│  ├─ melody.dfpwm
 │  ├─ soon.dfpwm
 │  ├─ train.dfpwm
 │  ├─ out_of_service_train.dfpwm
 │  ├─ warning.dfpwm
+│  ├─ passing_warning.dfpwm
 │  └─ destination/
 │     └─ <destination>.dfpwm
 ├─ destination/
 │  └─ <destination>.dfpwm
 ├─ station/
 │  └─ <destination>.dfpwm
-├─ arrival/
-│  └─ melody.dfpwm
-├─ passing/
-│  └─ warning.dfpwm
 ├─ departure/
-│  ├─ melody.dfpwm
 │  └─ doors_closing.dfpwm
 ├─ stopped/
 │  └─ notice.dfpwm
@@ -264,6 +309,15 @@ audio/
 ├─ track/
 ├─ class/
 └─ options/
+```
+
+旧配置はinstaller実行時に、移行先が空いている場合だけ次のように移動します。
+
+```text
+audio/approach/melody.dfpwm  -> audio/melody/approach.dfpwm
+audio/arrival/melody.dfpwm   -> audio/melody/arrival.dfpwm
+audio/departure/melody.dfpwm -> audio/melody/departure.dfpwm
+audio/passing/warning.dfpwm  -> audio/approach/passing_warning.dfpwm
 ```
 
 推奨DFPWMは mono / 48 kHzです。
@@ -281,7 +335,8 @@ ffmpeg -i input.wav -ac 1 -ar 48000 -c:a dfpwm output.dfpwm
 Playerは隣接するDFPWMをファイル単位で再生終了させず、各ファイルを**別々のDFPWM decoderでPCM化した後、PCMを1本の連続streamへ結合**します。
 
 ```text
-local.dfpwm                         --decode--\napproach/destination/tomita.dfpwm --decode---+-> continuous PCM -> Speaker
+local.dfpwm                         --decode--\
+approach/destination/tomita.dfpwm --decode---+-> continuous PCM -> Speaker
 warning.dfpwm                       --decode--/
 ```
 

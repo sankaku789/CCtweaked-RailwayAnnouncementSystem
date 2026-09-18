@@ -88,6 +88,20 @@ function Segment:_isEnabled(definition)
         return readConfigPath(self.config, definition.enabled) == true
     end
 
+    if type(definition.enabled) == "table" then
+        local value = readConfigPath(self.config, definition.enabled.path)
+
+        if value == nil and definition.enabled.fallbackPath ~= nil then
+            value = readConfigPath(self.config, definition.enabled.fallbackPath)
+        end
+
+        if value == nil then
+            return definition.enabled.default == true
+        end
+
+        return value == true
+    end
+
     error("invalid segment enabled condition")
 end
 

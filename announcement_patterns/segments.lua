@@ -1,8 +1,12 @@
 return {
     approach_melody = {
         kind = "file",
-        path = "audio/approach/melody.dfpwm",
-        enabled = "announcement.approach.melodyEnabled",
+        path = "audio/melody/approach.dfpwm",
+        enabled = {
+            path = "announcement.melody.approachEnabled",
+            fallbackPath = "announcement.approach.melodyEnabled",
+            default = true,
+        },
     },
 
     soon = {
@@ -70,18 +74,26 @@ return {
 
     arrival_melody = {
         kind = "file",
-        path = "audio/arrival/melody.dfpwm",
-        enabled = "announcement.approach.arrivalMelodyEnabled",
+        path = "audio/melody/arrival.dfpwm",
+        enabled = {
+            path = "announcement.melody.arrivalEnabled",
+            fallbackPath = "announcement.approach.arrivalMelodyEnabled",
+            default = false,
+        },
     },
 
     passing_warning = {
         kind = "file",
-        path = "audio/passing/warning.dfpwm",
+        path = "audio/approach/passing_warning.dfpwm",
     },
 
     departure_melody = {
         kind = "file",
-        path = "audio/departure/melody.dfpwm",
+        path = "audio/melody/departure.dfpwm",
+        enabled = {
+            path = "announcement.melody.departureEnabled",
+            default = true,
+        },
     },
 
     doors_closing = {

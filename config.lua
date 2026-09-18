@@ -80,9 +80,10 @@ return {
     },
 
     announcement = {
-        approach = {
-            melodyEnabled = true,
-            arrivalMelodyEnabled = false,
+        melody = {
+            approachEnabled = true,
+            arrivalEnabled = false,
+            departureEnabled = true,
         },
 
         departure = {
