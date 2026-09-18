@@ -14,7 +14,6 @@ return {
         "soon",
         "?track",
         "out_of_service_train",
-        "arrives",
         "warning",
         "?arrival_melody",
         "?route_options",

@@ -43,6 +43,7 @@ local REFRESHABLE_PATTERN_FILES = {
 
 local AUDIO_DIRECTORIES = {
     "audio/approach",
+    "audio/approach_destination",
     "audio/arrival",
     "audio/departure",
     "audio/passing",
@@ -50,7 +51,8 @@ local AUDIO_DIRECTORIES = {
     "audio/next_train",
     "audio/track",
     "audio/class",
-    "audio/destination",
+    "audio/destination_sentence",
+    "audio/station",
     "audio/options",
 }
 

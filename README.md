@@ -136,6 +136,25 @@ metadata取得成功時は次のようにログが出ます。
 
 Route IDがない場合も `routeId=-` としてmetadata取得自体はログされます。
 
+## 行先音声の方針
+
+行先は、細かい助詞単位で分割せず、用途に応じた自然な発話単位を3種類持ちます。
+
+```text
+audio/approach_destination/tomita.dfpwm
+→ 「富田行きが到着いたします。」
+
+audio/destination_sentence/tomita.dfpwm
+→ 「富田行きです。」
+
+audio/station/tomita.dfpwm
+→ 「富田」
+```
+
+同じmetadataの `destination = tomita` に対して、放送用途ごとに同じファイル名 `tomita.dfpwm` を各ディレクトリから引きます。
+
+旧 `audio/destination/` は標準パターンでは使用しません。既存ファイルはinstallerでも削除しません。
+
 ## 接近放送
 
 標準パターン:
@@ -152,41 +171,67 @@ approach = {
 }
 ```
 
-MTR metadataと対応音声が揃っている場合、`approach_train_arrival` は以下を1つの連続音声runとして解決します。
+MTR metadataと対応音声が揃っている場合、`approach_train_arrival` は次の2ファイルへ解決します。
 
 ```text
-class + destination + arrives
+class + approach_destination
 ```
 
 例:
 
 ```text
-local.dfpwm       = 「普通」
-tomita.dfpwm      = 「富田行きが」
-arrives.dfpwm     = 「到着いたします。」
-warning.dfpwm     = 「危険ですので、黄色い点字ブロックまでお下がりください」
+audio/class/local.dfpwm                    = 「普通」
+audio/approach_destination/tomita.dfpwm   = 「富田行きが到着いたします。」
+audio/approach/warning.dfpwm              = 「危険ですので、黄色い点字ブロックまでお下がりください」
 ```
 
 この場合の接近放送は次の構成です。
 
 ```text
-まもなく / 1番線に / 普通 / 富田行きが / 到着いたします。 / 危険ですので…
+まもなく / 1番線に / 普通 / 富田行きが到着いたします。 / 危険ですので…
 ```
 
-回送列車も共通の `arrives.dfpwm` を使います。
+行先から到着語尾までを1ファイルにまとめるため、接近放送ではクロスフェードやオーバーラップ再生を使用しません。
+
+回送列車も接近文を1ファイルにまとめます。
 
 ```text
-out_of_service_train.dfpwm = 「回送列車が」
-arrives.dfpwm              = 「到着いたします。」
+audio/approach/out_of_service_train.dfpwm
+= 「回送列車が到着いたします。」
 ```
 
-対応するclass / destination / arrives音声が揃わない場合は `train.dfpwm` へfallbackします。`train.dfpwm` の内容は従来どおりです。
+対応するclass / approach_destination音声が揃わない場合は `train.dfpwm` へfallbackします。
 
 ```text
-train.dfpwm = 「列車がまいります。」
+audio/approach/train.dfpwm = 「列車がまいります。」
 ```
 
 fallback後も共通の `warning.dfpwm` を続けます。
+
+## 次列車案内
+
+`next_train` の `train_info` は次の2ファイルへ解決します。
+
+```text
+class + destination_sentence
+```
+
+例:
+
+```text
+audio/class/local.dfpwm                   = 「普通」
+audio/destination_sentence/tomita.dfpwm  = 「富田行きです。」
+```
+
+したがって `next_train/intro.dfpwm` を「次の列車は」のような文にすれば、
+
+```text
+次の列車は / 普通 / 富田行きです。
+```
+
+のように構成できます。
+
+`station_name`、`destination_sentence`、`approach_destination` はそれぞれ動的segmentとして定義してあり、今後のmetadata対応パターンから単独でも利用できます。
 
 ## 音声ファイル
 
@@ -197,8 +242,13 @@ audio/
 │  ├─ soon.dfpwm
 │  ├─ train.dfpwm
 │  ├─ out_of_service_train.dfpwm
-│  ├─ arrives.dfpwm
 │  └─ warning.dfpwm
+├─ approach_destination/
+│  └─ <destination>.dfpwm
+├─ destination_sentence/
+│  └─ <destination>.dfpwm
+├─ station/
+│  └─ <destination>.dfpwm
 ├─ arrival/
 │  └─ melody.dfpwm
 ├─ passing/
@@ -213,7 +263,6 @@ audio/
 │  └─ generic.dfpwm
 ├─ track/
 ├─ class/
-├─ destination/
 └─ options/
 ```
 
@@ -229,18 +278,15 @@ ffmpeg -i input.wav -ac 1 -ar 48000 -c:a dfpwm output.dfpwm
 
 通常セグメント間には人工的な待機を入れません。
 
-さらにPlayerは隣接するDFPWMをファイル単位で再生終了させず、各ファイルを**別々のDFPWM decoderでPCM化した後、PCMを1本の連続streamへ結合**します。
+Playerは隣接するDFPWMをファイル単位で再生終了させず、各ファイルを**別々のDFPWM decoderでPCM化した後、PCMを1本の連続streamへ結合**します。
 
 ```text
-local.dfpwm       --decode--\
-tomita.dfpwm      --decode---+-> continuous PCM -> Speaker
-arrives.dfpwm     --decode---+
-warning.dfpwm     --decode--/
+local.dfpwm                         --decode--\
+approach_destination/tomita.dfpwm --decode---+-> continuous PCM -> Speaker
+warning.dfpwm                       --decode--/
 ```
 
 DFPWM decoderはファイルごとに作り直すためstream stateを混ぜません。一方、Speakerへ渡すPCMはファイル境界を跨いで最大 `128 * 1024` samplesまでまとめます。
-
-これにより、`0秒`設定でも発生していた「ファイルを閉じる → 次を開く」境界の体感上の間を減らします。
 
 明示的に間を入れたい場合だけ、パターンで以下を使えます。
 

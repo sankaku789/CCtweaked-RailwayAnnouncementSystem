@@ -32,14 +32,14 @@ local function readConfigPath(root, path)
     return value
 end
 
--- function: Append resolved playback items to an output list.
-local function appendAll(output, items)
-    if not items then
+-- function: Append resolved segment paths to an output list.
+local function appendAll(output, paths)
+    if not paths then
         return
     end
 
-    for _, item in ipairs(items) do
-        output[#output + 1] = item
+    for _, path in ipairs(paths) do
+        output[#output + 1] = path
     end
 end
 
@@ -103,7 +103,22 @@ function Segment:_resolveTrack(definition, context)
     return nil
 end
 
--- function: Resolve class and destination files as one train information segment.
+-- function: Resolve a destination-based audio variant from train metadata.
+function Segment:_resolveDestination(definition, context)
+    local metadata = context and context.metadata or nil
+    if type(metadata) ~= "table" then
+        return nil
+    end
+
+    local path = self:fromId(definition.directory, metadata.destination)
+    if path then
+        return { path }
+    end
+
+    return nil
+end
+
+-- function: Resolve class and one destination phrase variant as train information.
 function Segment:_resolveTrainInfo(definition, context)
     local metadata = context and context.metadata or nil
     if type(metadata) ~= "table" then
@@ -118,34 +133,6 @@ function Segment:_resolveTrainInfo(definition, context)
     end
 
     return { classPath, destinationPath }
-end
-
--- function: Resolve class plus an overlapped destination and shared arrival suffix for an approach announcement.
-function Segment:_resolveTrainArrival(definition, context)
-    local trainInfo = self:_resolveTrainInfo(definition, context)
-    if not trainInfo or not self:exists(definition.arrivalPath) then
-        return nil
-    end
-
-    local overlapSeconds = tonumber(definition.arrivalOverlapSeconds) or 0
-    if overlapSeconds < 0 then
-        error("arrival overlap duration must be non-negative")
-    end
-
-    if overlapSeconds == 0 then
-        trainInfo[#trainInfo + 1] = definition.arrivalPath
-        return trainInfo
-    end
-
-    return {
-        trainInfo[1],
-        {
-            kind = "overlap",
-            left = trainInfo[2],
-            right = definition.arrivalPath,
-            seconds = overlapSeconds,
-        },
-    }
 end
 
 -- function: Resolve route-specific optional segment IDs for the current announcement type.
@@ -192,14 +179,14 @@ function Segment:_resolveRouteOptions(_definition, context)
     return output
 end
 
--- function: Resolve a named dynamic segment into playback items.
+-- function: Resolve a named dynamic segment into audio file paths.
 function Segment:_resolveDynamic(definition, context)
     if definition.resolver == "track" then
         return self:_resolveTrack(definition, context)
+    elseif definition.resolver == "destination" then
+        return self:_resolveDestination(definition, context)
     elseif definition.resolver == "train_info" then
         return self:_resolveTrainInfo(definition, context)
-    elseif definition.resolver == "train_arrival" then
-        return self:_resolveTrainArrival(definition, context)
     elseif definition.resolver == "route_options" then
         return self:_resolveRouteOptions(definition, context)
     end
@@ -207,7 +194,7 @@ function Segment:_resolveDynamic(definition, context)
     error("unknown dynamic segment resolver: " .. tostring(definition.resolver))
 end
 
--- function: Resolve a semantic segment ID into one or more playback items.
+-- function: Resolve a semantic segment ID into one or more audio file paths.
 function Segment:resolve(id, context, requirePlayable)
     local definition = self.definitions[id]
     if type(definition) ~= "table" then

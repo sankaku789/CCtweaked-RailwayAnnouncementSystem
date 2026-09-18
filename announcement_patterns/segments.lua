@@ -18,18 +18,34 @@ return {
 
     approach_train_arrival = {
         kind = "dynamic",
-        resolver = "train_arrival",
+        resolver = "train_info",
         classDirectory = "audio/class",
-        destinationDirectory = "audio/destination",
-        arrivalPath = "audio/approach/arrives.dfpwm",
-        arrivalOverlapSeconds = 0.1,
+        destinationDirectory = "audio/approach_destination",
     },
 
     train_info = {
         kind = "dynamic",
         resolver = "train_info",
         classDirectory = "audio/class",
-        destinationDirectory = "audio/destination",
+        destinationDirectory = "audio/destination_sentence",
+    },
+
+    approach_destination = {
+        kind = "dynamic",
+        resolver = "destination",
+        directory = "audio/approach_destination",
+    },
+
+    destination_sentence = {
+        kind = "dynamic",
+        resolver = "destination",
+        directory = "audio/destination_sentence",
+    },
+
+    station_name = {
+        kind = "dynamic",
+        resolver = "destination",
+        directory = "audio/station",
     },
 
     route_options = {
@@ -45,11 +61,6 @@ return {
     out_of_service_train = {
         kind = "file",
         path = "audio/approach/out_of_service_train.dfpwm",
-    },
-
-    arrives = {
-        kind = "file",
-        path = "audio/approach/arrives.dfpwm",
     },
 
     warning = {
