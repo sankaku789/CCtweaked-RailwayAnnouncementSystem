@@ -162,22 +162,22 @@ class + destination + arrives
 
 ```text
 local.dfpwm       = 「普通」
-tomita.dfpwm      = 「富田行きが」
-arrives.dfpwm     = 「到着いたします。」
+tomita.dfpwm      = 「富田ゆき」
+arrives.dfpwm     = 「が到着いたします。」
 warning.dfpwm     = 「危険ですので、黄色い点字ブロックまでお下がりください」
 ```
 
 この場合の接近放送は次の構成です。
 
 ```text
-まもなく / 1番線に / 普通 / 富田行きが / 到着いたします。 / 危険ですので…
+まもなく / 1番線に / 普通 / 富田ゆき / が到着いたします。 / 危険ですので…
 ```
 
-回送列車も共通の `arrives.dfpwm` を使います。
+回送列車は共通の `arrives.dfpwm` を使います。
 
 ```text
-out_of_service_train.dfpwm = 「回送列車が」
-arrives.dfpwm              = 「到着いたします。」
+out_of_service_train.dfpwm = 「回送列車」
+arrives.dfpwm              = 「が到着いたします。」
 ```
 
 対応するclass / destination / arrives音声が揃わない場合は `train.dfpwm` へfallbackします。`train.dfpwm` の内容は従来どおりです。
