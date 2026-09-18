@@ -20,26 +20,26 @@ return {
         kind = "dynamic",
         resolver = "train_info",
         classDirectory = "audio/class",
-        destinationDirectory = "audio/approach_destination",
+        destinationDirectory = "audio/approach/destination",
     },
 
     train_info = {
         kind = "dynamic",
         resolver = "train_info",
         classDirectory = "audio/class",
-        destinationDirectory = "audio/destination_sentence",
+        destinationDirectory = "audio/destination",
     },
 
     approach_destination = {
         kind = "dynamic",
         resolver = "destination",
-        directory = "audio/approach_destination",
+        directory = "audio/approach/destination",
     },
 
     destination_sentence = {
         kind = "dynamic",
         resolver = "destination",
-        directory = "audio/destination_sentence",
+        directory = "audio/destination",
     },
 
     station_name = {
