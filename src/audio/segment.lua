@@ -40,12 +40,6 @@ function Segment.new(config, definitions)
     }, Segment)
 end
 
--- function: Check whether a named segment is defined by the segment table.
-function Segment:has(id)
-    local definition = self.definitions[id]
-    return type(definition) == "string" or type(definition) == "table"
-end
-
 -- function: Check whether an audio file exists and is not a directory.
 function Segment:exists(path)
     return type(path) == "string"
@@ -167,6 +161,10 @@ function Segment:resolve(id, context, requirePlayable)
 
     if type(definition) ~= "table" then
         error("unknown announcement segment: " .. tostring(id))
+    end
+
+    if definition.kind ~= nil then
+        error("segment definition kind is not supported: " .. tostring(id))
     end
 
     if not self:_isEnabled(definition) then

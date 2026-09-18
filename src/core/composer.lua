@@ -195,12 +195,8 @@ function Composer:_resolveRouteOptions(context, resolving)
     return output
 end
 
--- function: Resolve one segment, composite, or route-options symbol into playback items.
+-- function: Resolve one composite, route-options, or segment symbol into playback items.
 function Composer:_resolveSymbol(id, context, requirePlayable, resolving)
-    if type(self.resolver.has) == "function" and self.resolver:has(id) then
-        return self.resolver:resolve(id, context, requirePlayable)
-    end
-
     local composite = self.composites[id]
     if composite ~= nil then
         return self:_resolveComposite(id, composite, context, resolving)
