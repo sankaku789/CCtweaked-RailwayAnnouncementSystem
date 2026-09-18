@@ -62,7 +62,7 @@ return {
     approach_destination = {
         kind = "dynamic",
         resolver = "destination",
-        directory = "audio/approach/destination",
+        directory = "audio/destination/mairimasu/",
     },
 
     destination_sentence = {
@@ -92,9 +92,9 @@ return {
         path = "audio/approach/out_of_service_train.dfpwm",
     },
 
-    passing = {
+    passing_train = {
         kind = "file",
-        path = "audio/approach/passing.dfpwm",
+        path = "audio/approach/passing_train.dfpwm",
     },
 
     warning = {
