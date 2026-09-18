@@ -132,11 +132,36 @@ function Segment:_resolveDestination(definition, context)
     return nil
 end
 
--- function: Resolve an optional fixed prefix, class, and destination phrase as train information.
+-- function: Resolve optional intro, track, and prefix audio followed by class and destination train information.
 function Segment:_resolveTrainInfo(definition, context)
+    local request = context and context.request or nil
     local metadata = context and context.metadata or nil
     if type(metadata) ~= "table" then
         return nil
+    end
+
+    local introPath = definition.introPath
+    if introPath ~= nil then
+        if type(introPath) ~= "string" or introPath == "" then
+            error("train_info introPath must be a non-empty string")
+        end
+
+        if not self:exists(introPath) then
+            return nil
+        end
+    end
+
+    local trackPath = nil
+    local trackDirectory = definition.trackDirectory
+    if trackDirectory ~= nil then
+        if type(trackDirectory) ~= "string" or trackDirectory == "" then
+            error("train_info trackDirectory must be a non-empty string")
+        end
+
+        trackPath = self:fromId(trackDirectory, request and request.track or nil)
+        if not trackPath then
+            return nil
+        end
     end
 
     local prefixPath = definition.prefixPath
@@ -158,6 +183,12 @@ function Segment:_resolveTrainInfo(definition, context)
     end
 
     local output = {}
+    if introPath then
+        output[#output + 1] = introPath
+    end
+    if trackPath then
+        output[#output + 1] = trackPath
+    end
     if prefixPath then
         output[#output + 1] = prefixPath
     end

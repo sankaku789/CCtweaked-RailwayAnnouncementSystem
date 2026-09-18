@@ -32,15 +32,10 @@ return {
     },
 
     stopped = {
-        "?track_ni",
-        "?stopped_train_info|stopped_generic",
-        "?route_options",
+        "?stopped_train_info",
     },
 
     next_train = {
-        "next_train_intro",
-        "?track_ni",
-        "?next_train_info|next_train_generic",
-        "?route_options",
+        "?next_train_info",
     },
 }

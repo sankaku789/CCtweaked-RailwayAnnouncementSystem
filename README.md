@@ -108,12 +108,10 @@ audio/
 ├─ class/
 │  └─ <class>.dfpwm
 ├─ stopped/
-│  ├─ train.dfpwm
-│  └─ generic.dfpwm
+│  └─ train.dfpwm
 ├─ next_train/
 │  ├─ intro.dfpwm
-│  ├─ train.dfpwm
-│  └─ generic.dfpwm
+│  └─ train.dfpwm
 ├─ departure/
 │  └─ doors_closing.dfpwm
 └─ options/
@@ -169,7 +167,7 @@ approach = {
 まもなく / 1番線に / 普通 / 富田ゆきがまいります。 / 危険ですので…
 ```
 
-metadata用音声が揃わない場合は `audio/approach/train.dfpwm` へfallbackします。
+metadata用音声が揃わない場合は `audio/approach/train.dfpwm` へfallbackします。接近放送だけは簡易放送へのfallbackを持ちます。
 
 ## 通過放送
 
@@ -200,22 +198,21 @@ audio/approach/warning.dfpwm
 
 ## 停車中の定期案内
 
-`stopped` は `PLATFORM` 状態で定期実行できる放送です。停止中でもTSC metadataを取得し、接近時と同じ列車情報cacheを利用できます。
+`stopped` は `PLATFORM` 状態で定期実行できる放送です。停車中もTSC metadataを取得し、列車種別と行先を使います。
 
 標準パターン:
 
 ```lua
 stopped = {
-    "?track_ni",
-    "?stopped_train_info|stopped_generic",
-    "?route_options",
+    "?stopped_train_info",
 }
 ```
 
-`stopped_train_info` は次の3音声へ解決します。
+`stopped_train_info` は放送全体を一括で解決します。
 
 ```text
-audio/stopped/train.dfpwm
+audio/track/ni/<track>.dfpwm
++ audio/stopped/train.dfpwm
 + audio/class/<class>.dfpwm
 + audio/destination/desu/<destination>.dfpwm
 ```
@@ -229,9 +226,10 @@ audio/stopped/train.dfpwm
 推奨内容:
 
 ```text
-audio/stopped/train.dfpwm   -> 「停車中の列車は」
-audio/stopped/generic.dfpwm -> metadataがない場合の任意fallback
+audio/stopped/train.dfpwm -> 「停車中の列車は」
 ```
+
+停車中案内には簡易放送・generic fallbackを実装しません。metadata、番線、固定文、列車種別、行先音声のどれかが不足する場合は、不完全な文を流さずその回の放送をスキップします。
 
 既定では定期放送はOFFです。有効化する場合は保持されている `config.lua` を編集します。
 
@@ -253,17 +251,16 @@ periodic = {
 
 ```lua
 next_train = {
-    "next_train_intro",
-    "?track_ni",
-    "?next_train_info|next_train_generic",
-    "?route_options",
+    "?next_train_info",
 }
 ```
 
-`next_train_info` は次の3音声へ解決します。
+`next_train_info` も放送全体を一括で解決します。
 
 ```text
-audio/next_train/train.dfpwm
+audio/next_train/intro.dfpwm
++ audio/track/ni/<track>.dfpwm
++ audio/next_train/train.dfpwm
 + audio/class/<class>.dfpwm
 + audio/destination/desu/<destination>.dfpwm
 ```
@@ -279,8 +276,9 @@ audio/next_train/train.dfpwm
 ```text
 audio/next_train/intro.dfpwm -> 「次に」
 audio/next_train/train.dfpwm -> 「まいります列車は」
-audio/next_train/generic.dfpwm -> metadataがない場合の任意fallback
 ```
+
+次列車案内にも簡易放送・generic fallbackを実装しません。必要なmetadataまたは音声が不足する場合は、その回の放送全体をスキップします。
 
 既定では `next_train` の定期放送もOFFです。有効化する場合:
 
@@ -296,24 +294,26 @@ periodic = {
 }
 ```
 
+旧 `audio/stopped/generic.dfpwm` と `audio/next_train/generic.dfpwm` がローカルに残っていても、標準パターンでは使用しません。installerは既存音声を削除しません。
+
 ## 旧音声の自動移行
 
 installerは移行先に同名ファイルがない場合だけ旧配置を移動します。
 
 ```text
-audio/approach/melody.dfpwm        -> audio/melody/approach.dfpwm
-audio/arrival/melody.dfpwm         -> audio/melody/arrival.dfpwm
-audio/departure/melody.dfpwm       -> audio/melody/departure.dfpwm
-audio/approach/passing.dfpwm       -> audio/approach/passing_train.dfpwm
+audio/approach/melody.dfpwm         -> audio/melody/approach.dfpwm
+audio/arrival/melody.dfpwm          -> audio/melody/arrival.dfpwm
+audio/departure/melody.dfpwm        -> audio/melody/departure.dfpwm
+audio/approach/passing.dfpwm        -> audio/approach/passing_train.dfpwm
 
-audio/approach/destination/*.dfpwm -> audio/destination/mairimasu/*.dfpwm
-audio/approach_destination/*.dfpwm -> audio/destination/mairimasu/*.dfpwm
-audio/destination/*.dfpwm          -> audio/destination/desu/*.dfpwm
-audio/destination_sentence/*.dfpwm -> audio/destination/desu/*.dfpwm
+audio/approach/destination/*.dfpwm  -> audio/destination/mairimasu/*.dfpwm
+audio/approach_destination/*.dfpwm  -> audio/destination/mairimasu/*.dfpwm
+audio/destination/*.dfpwm           -> audio/destination/desu/*.dfpwm
+audio/destination_sentence/*.dfpwm  -> audio/destination/desu/*.dfpwm
 
-audio/track/*.dfpwm                -> audio/track/ni/*.dfpwm
-audio/track/approach/*.dfpwm       -> audio/track/ni/*.dfpwm
-audio/track/passing/*.dfpwm        -> audio/track/wo/*.dfpwm
+audio/track/*.dfpwm                 -> audio/track/ni/*.dfpwm
+audio/track/approach/*.dfpwm        -> audio/track/ni/*.dfpwm
+audio/track/passing/*.dfpwm         -> audio/track/wo/*.dfpwm
 ```
 
 `audio/stopped/notice.dfpwm` は内容が不明なため `train.dfpwm` へ自動移行しません。必要なら手動で録音・配置してください。

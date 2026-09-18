@@ -136,6 +136,7 @@ return {
     stopped_train_info = {
         kind = "dynamic",
         resolver = "train_info",
+        trackDirectory = "audio/track/ni",
         prefixPath = "audio/stopped/train.dfpwm",
         classDirectory = "audio/class",
         destinationDirectory = "audio/destination/desu",
@@ -147,11 +148,7 @@ return {
         path = "audio/stopped/train.dfpwm",
     },
 
-    stopped_generic = {
-        kind = "file",
-        path = "audio/stopped/generic.dfpwm",
-    },
-
+    -- Legacy fixed segment for custom next-train patterns.
     next_train_intro = {
         kind = "file",
         path = "audio/next_train/intro.dfpwm",
@@ -160,13 +157,10 @@ return {
     next_train_info = {
         kind = "dynamic",
         resolver = "train_info",
+        introPath = "audio/next_train/intro.dfpwm",
+        trackDirectory = "audio/track/ni",
         prefixPath = "audio/next_train/train.dfpwm",
         classDirectory = "audio/class",
         destinationDirectory = "audio/destination/desu",
-    },
-
-    next_train_generic = {
-        kind = "file",
-        path = "audio/next_train/generic.dfpwm",
     },
 }
