@@ -49,6 +49,8 @@ local AUDIO_DIRECTORIES = {
     "audio/stopped",
     "audio/next_train",
     "audio/track",
+    "audio/track/approach",
+    "audio/track/passing",
     "audio/class",
     "audio/destination",
     "audio/station",
@@ -97,10 +99,6 @@ local LEGACY_AUDIO_FILES = {
     {
         source = "audio/departure/melody.dfpwm",
         target = "audio/melody/departure.dfpwm",
-    },
-    {
-        source = "audio/passing/warning.dfpwm",
-        target = "audio/approach/passing_warning.dfpwm",
     },
 }
 
@@ -257,6 +255,32 @@ local function migrateLegacyAudioFiles()
     end
 end
 
+-- function: Move root-level legacy track audio files into the approach track variant directory.
+local function migrateLegacyTrackFiles()
+    local sourceDirectory = targetPath("audio/track")
+    if not fs.exists(sourceDirectory) or not fs.isDir(sourceDirectory) then
+        return
+    end
+
+    local targetDirectory = targetPath("audio/track/approach")
+
+    for _, name in ipairs(fs.list(sourceDirectory)) do
+        local source = fs.combine(sourceDirectory, name)
+
+        if not fs.isDir(source) and name:sub(-6) == ".dfpwm" then
+            local target = fs.combine(targetDirectory, name)
+
+            if fs.exists(target) then
+                print("Keep legacy track -> audio/track/" .. name)
+            else
+                ensureDirectory(targetDirectory)
+                fs.move(source, target)
+                print(("Migrate track -> audio/track/%s -> audio/track/approach/%s"):format(name, name))
+            end
+        end
+    end
+end
+
 -- function: Create all directories reserved for DFPWM announcement assets.
 local function createAudioDirectories()
     for _, repositoryPath in ipairs(AUDIO_DIRECTORIES) do
@@ -298,6 +322,7 @@ local function install()
 
     migrateLegacyPatternFiles()
     migrateLegacyAudioFiles()
+    migrateLegacyTrackFiles()
 
     for _, repositoryPath in ipairs(RUNTIME_FILES) do
         downloadFile(repositoryPath, false)

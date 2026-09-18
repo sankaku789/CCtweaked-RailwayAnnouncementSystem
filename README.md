@@ -22,7 +22,7 @@ wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncem
 
 `--refresh-patterns` でも `config.lua`、`announcement_patterns/route_options.lua`、DFPWM音声は保持されます。
 
-旧ディレクトリ構成のメロディ・通過警告音声がある場合、installerは新しい配置へ自動移行します。移行先に同名ファイルが既にある場合は上書きしません。
+旧ディレクトリ構成のメロディ音声がある場合、installerは新しい配置へ自動移行します。旧 `audio/track/*.dfpwm` は接近用の `audio/track/approach/` へ移行します。移行先に同名ファイルが既にある場合は上書きしません。
 
 ## 音声パック
 
@@ -185,6 +185,20 @@ announcement = {
 
 旧設定の `announcement.approach.melodyEnabled` と `announcement.approach.arrivalMelodyEnabled` も互換用fallbackとして読み取ります。旧configを保持したまま更新しても従来のON/OFF設定を引き継げます。
 
+## 番線音声
+
+接近放送と通過放送では助詞が異なるため、番線音声を用途別に分けます。
+
+```text
+audio/track/approach/1.dfpwm
+→ 「1番線に」
+
+audio/track/passing/1.dfpwm
+→ 「1番線を」
+```
+
+標準パターンでは `approach_track` と `passing_track` を使い分けます。旧 `track` segment はカスタムパターン互換用として `audio/track/approach/` を参照します。
+
 ## 接近放送
 
 標準パターン:
@@ -193,7 +207,7 @@ announcement = {
 approach = {
     "?approach_melody",
     "soon",
-    "?track",
+    "?approach_track",
     "approach_train_arrival|train",
     "warning",
     "?arrival_melody",
@@ -240,19 +254,34 @@ fallback後も共通の `warning.dfpwm` を続けます。
 
 ### 通過放送
 
-`passing` は状態を変えない独立イベントのままですが、音声assetは接近系として `audio/approach/` にまとめます。
+`passing` は状態を変えない独立イベントです。番線は通過用の `passing_track` を使い、通過本文の後ろは接近放送と同じ汎用 `warning` を使います。
 
-```text
-audio/approach/passing_warning.dfpwm
-```
-
-標準パターンは引き続き次のとおりです。
+標準パターン:
 
 ```lua
 passing = {
-    "passing_warning",
+    "soon",
+    "?passing_track",
+    "passing",
+    "warning",
 }
 ```
+
+音声例:
+
+```text
+audio/track/passing/1.dfpwm = 「1番線を」
+audio/approach/passing.dfpwm = 「列車が通過いたします。」
+audio/approach/warning.dfpwm = 「危険ですので、黄色い点字ブロックまでお下がりください」
+```
+
+構成例:
+
+```text
+まもなく / 1番線を / 列車が通過いたします。 / 危険ですので…
+```
+
+旧 `audio/approach/passing_warning.dfpwm` は標準パターンでは使用しません。通過本文と汎用warningの内容が混ざっている可能性があるため、installerでは `passing.dfpwm` へ自動変換しません。
 
 ## 次列車案内
 
@@ -291,8 +320,8 @@ audio/
 │  ├─ soon.dfpwm
 │  ├─ train.dfpwm
 │  ├─ out_of_service_train.dfpwm
+│  ├─ passing.dfpwm
 │  ├─ warning.dfpwm
-│  ├─ passing_warning.dfpwm
 │  └─ destination/
 │     └─ <destination>.dfpwm
 ├─ destination/
@@ -307,6 +336,10 @@ audio/
 │  ├─ intro.dfpwm
 │  └─ generic.dfpwm
 ├─ track/
+│  ├─ approach/
+│  │  └─ <track>.dfpwm
+│  └─ passing/
+│     └─ <track>.dfpwm
 ├─ class/
 └─ options/
 ```
@@ -317,7 +350,7 @@ audio/
 audio/approach/melody.dfpwm  -> audio/melody/approach.dfpwm
 audio/arrival/melody.dfpwm   -> audio/melody/arrival.dfpwm
 audio/departure/melody.dfpwm -> audio/melody/departure.dfpwm
-audio/passing/warning.dfpwm  -> audio/approach/passing_warning.dfpwm
+audio/track/<track>.dfpwm    -> audio/track/approach/<track>.dfpwm
 ```
 
 推奨DFPWMは mono / 48 kHzです。

@@ -14,10 +14,23 @@ return {
         path = "audio/approach/soon.dfpwm",
     },
 
+    approach_track = {
+        kind = "dynamic",
+        resolver = "track",
+        directory = "audio/track/approach",
+    },
+
+    passing_track = {
+        kind = "dynamic",
+        resolver = "track",
+        directory = "audio/track/passing",
+    },
+
+    -- Legacy alias for custom patterns that still reference track.
     track = {
         kind = "dynamic",
         resolver = "track",
-        directory = "audio/track",
+        directory = "audio/track/approach",
     },
 
     approach_train_arrival = {
@@ -67,6 +80,11 @@ return {
         path = "audio/approach/out_of_service_train.dfpwm",
     },
 
+    passing = {
+        kind = "file",
+        path = "audio/approach/passing.dfpwm",
+    },
+
     warning = {
         kind = "file",
         path = "audio/approach/warning.dfpwm",
@@ -80,11 +98,6 @@ return {
             fallbackPath = "announcement.approach.arrivalMelodyEnabled",
             default = false,
         },
-    },
-
-    passing_warning = {
-        kind = "file",
-        path = "audio/approach/passing_warning.dfpwm",
     },
 
     departure_melody = {
