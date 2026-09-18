@@ -145,33 +145,48 @@ approach = {
     "?approach_melody",
     "soon",
     "?track",
-    "approach_train_block|train",
+    "approach_train_arrival|train",
+    "warning",
     "?arrival_melody",
     "?route_options",
 }
 ```
 
-MTR metadataと対応音声が揃っている場合、`approach_train_block` は以下を1つの連続音声runとして解決します。
+MTR metadataと対応音声が揃っている場合、`approach_train_arrival` は以下を1つの連続音声runとして解決します。
 
 ```text
-class + destination + warning
+class + destination + arrives
 ```
 
 例:
 
 ```text
-rapid.dfpwm       = 「快速」
-sapporo.dfpwm     = 「札幌行きが」
-warning.dfpwm     = 「まいります。危ないですから…」
+local.dfpwm       = 「普通」
+tomita.dfpwm      = 「富田ゆき」
+arrives.dfpwm     = 「が到着いたします。」
+warning.dfpwm     = 「危険ですので、黄色い点字ブロックまでお下がりください」
 ```
 
-対応するclass / destination音声がない場合は `train.dfpwm` へfallbackします。
+この場合の接近放送は次の構成です。
+
+```text
+まもなく / 1番線に / 普通 / 富田ゆき / が到着いたします。 / 危険ですので…
+```
+
+回送列車は共通の `arrives.dfpwm` を使います。
+
+```text
+out_of_service_train.dfpwm = 「回送列車」
+arrives.dfpwm              = 「が到着いたします。」
+```
+
+対応するclass / destination / arrives音声が揃わない場合は `train.dfpwm` へfallbackします。`train.dfpwm` の内容は従来どおりです。
 
 ```text
 train.dfpwm = 「列車がまいります。」
 ```
 
-fallbackでは `warning.dfpwm` を追加しないため、「まいります。まいります。」にはなりません。
+fallback後も共通の `warning.dfpwm` を続けます。
 
 ## 音声ファイル
 
@@ -182,6 +197,7 @@ audio/
 │  ├─ soon.dfpwm
 │  ├─ train.dfpwm
 │  ├─ out_of_service_train.dfpwm
+│  ├─ arrives.dfpwm
 │  └─ warning.dfpwm
 ├─ arrival/
 │  └─ melody.dfpwm
@@ -216,9 +232,10 @@ ffmpeg -i input.wav -ac 1 -ar 48000 -c:a dfpwm output.dfpwm
 さらにPlayerは隣接するDFPWMをファイル単位で再生終了させず、各ファイルを**別々のDFPWM decoderでPCM化した後、PCMを1本の連続streamへ結合**します。
 
 ```text
-rapid.dfpwm      --decode--\
-sapporo.dfpwm    --decode---+-> continuous PCM -> Speaker
-warning.dfpwm    --decode--/
+local.dfpwm       --decode--\
+tomita.dfpwm      --decode---+-> continuous PCM -> Speaker
+arrives.dfpwm     --decode---+
+warning.dfpwm     --decode--/
 ```
 
 DFPWM decoderはファイルごとに作り直すためstream stateを混ぜません。一方、Speakerへ渡すPCMはファイル境界を跨いで最大 `128 * 1024` samplesまでまとめます。

@@ -16,11 +16,12 @@ return {
         directory = "audio/track",
     },
 
-    approach_train_info = {
+    approach_train_arrival = {
         kind = "dynamic",
-        resolver = "train_info",
+        resolver = "train_arrival",
         classDirectory = "audio/class",
         destinationDirectory = "audio/destination",
+        arrivalPath = "audio/approach/arrives.dfpwm",
     },
 
     train_info = {
@@ -43,6 +44,11 @@ return {
     out_of_service_train = {
         kind = "file",
         path = "audio/approach/out_of_service_train.dfpwm",
+    },
+
+    arrives = {
+        kind = "file",
+        path = "audio/approach/arrives.dfpwm",
     },
 
     warning = {

@@ -120,6 +120,17 @@ function Segment:_resolveTrainInfo(definition, context)
     return { classPath, destinationPath }
 end
 
+-- function: Resolve class, destination, and the shared arrival suffix for an approach announcement.
+function Segment:_resolveTrainArrival(definition, context)
+    local trainInfo = self:_resolveTrainInfo(definition, context)
+    if not trainInfo or not self:exists(definition.arrivalPath) then
+        return nil
+    end
+
+    trainInfo[#trainInfo + 1] = definition.arrivalPath
+    return trainInfo
+end
+
 -- function: Resolve route-specific optional segment IDs for the current announcement type.
 function Segment:_resolveRouteOptions(_definition, context)
     local request = context and context.request or nil
@@ -170,6 +181,8 @@ function Segment:_resolveDynamic(definition, context)
         return self:_resolveTrack(definition, context)
     elseif definition.resolver == "train_info" then
         return self:_resolveTrainInfo(definition, context)
+    elseif definition.resolver == "train_arrival" then
+        return self:_resolveTrainArrival(definition, context)
     elseif definition.resolver == "route_options" then
         return self:_resolveRouteOptions(definition, context)
     end
