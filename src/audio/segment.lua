@@ -32,14 +32,14 @@ local function readConfigPath(root, path)
     return value
 end
 
--- function: Append resolved segment paths to an output list.
-local function appendAll(output, paths)
-    if not paths then
+-- function: Append resolved playback items to an output list.
+local function appendAll(output, items)
+    if not items then
         return
     end
 
-    for _, path in ipairs(paths) do
-        output[#output + 1] = path
+    for _, item in ipairs(items) do
+        output[#output + 1] = item
     end
 end
 
@@ -120,15 +120,32 @@ function Segment:_resolveTrainInfo(definition, context)
     return { classPath, destinationPath }
 end
 
--- function: Resolve class, destination, and the shared arrival suffix for an approach announcement.
+-- function: Resolve class plus an overlapped destination and shared arrival suffix for an approach announcement.
 function Segment:_resolveTrainArrival(definition, context)
     local trainInfo = self:_resolveTrainInfo(definition, context)
     if not trainInfo or not self:exists(definition.arrivalPath) then
         return nil
     end
 
-    trainInfo[#trainInfo + 1] = definition.arrivalPath
-    return trainInfo
+    local overlapSeconds = tonumber(definition.arrivalOverlapSeconds) or 0
+    if overlapSeconds < 0 then
+        error("arrival overlap duration must be non-negative")
+    end
+
+    if overlapSeconds == 0 then
+        trainInfo[#trainInfo + 1] = definition.arrivalPath
+        return trainInfo
+    end
+
+    return {
+        trainInfo[1],
+        {
+            kind = "overlap",
+            left = trainInfo[2],
+            right = definition.arrivalPath,
+            seconds = overlapSeconds,
+        },
+    }
 end
 
 -- function: Resolve route-specific optional segment IDs for the current announcement type.
@@ -175,7 +192,7 @@ function Segment:_resolveRouteOptions(_definition, context)
     return output
 end
 
--- function: Resolve a named dynamic segment into audio file paths.
+-- function: Resolve a named dynamic segment into playback items.
 function Segment:_resolveDynamic(definition, context)
     if definition.resolver == "track" then
         return self:_resolveTrack(definition, context)
@@ -190,7 +207,7 @@ function Segment:_resolveDynamic(definition, context)
     error("unknown dynamic segment resolver: " .. tostring(definition.resolver))
 end
 
--- function: Resolve a semantic segment ID into one or more audio file paths.
+-- function: Resolve a semantic segment ID into one or more playback items.
 function Segment:resolve(id, context, requirePlayable)
     local definition = self.definitions[id]
     if type(definition) ~= "table" then
