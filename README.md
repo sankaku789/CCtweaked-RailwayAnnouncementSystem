@@ -2,11 +2,11 @@
 
 CC:Tweaked向けの鉄道自動放送システムです。
 
-「1線 = 1 Computer」を基本に、ProjectRed等のBundled Redstone入力、MTR / Transport Simulation Core (TSC) metadata、DFPWM音声、優先度付き放送、Route別追加放送を分離して扱います。
+「1線 = 1 Computer」を基本に、Bundled Redstone入力、MTR / Transport Simulation Core (TSC) metadata、DFPWM音声、優先度付き放送、Route別追加放送を分離して扱います。
 
 ## インストール / 更新
 
-通常のインストール・runtime更新:
+通常のruntime更新:
 
 ```text
 wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncementSystem/main/install.lua
@@ -14,7 +14,7 @@ wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncem
 
 既存の `config.lua`、`announcement_patterns/`、Route別設定、DFPWM音声は保持されます。
 
-標準の `announcement_patterns/main.lua` と `announcement_patterns/segments.lua` も最新版へ更新したい場合:
+標準の `announcement_patterns/main.lua` と `announcement_patterns/segments.lua` も更新する場合:
 
 ```text
 wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncementSystem/main/install.lua --refresh-patterns
@@ -22,27 +22,7 @@ wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncem
 
 `--refresh-patterns` でも `config.lua`、`announcement_patterns/route_options.lua`、DFPWM音声は保持されます。
 
-旧ディレクトリ構成のメロディ音声がある場合、installerは新しい配置へ自動移行します。旧 `audio/track/*.dfpwm` と `audio/track/approach/*.dfpwm` は `audio/track/ni/`、旧 `audio/track/passing/*.dfpwm` は `audio/track/wo/` へ移行します。移行先に同名ファイルが既にある場合は上書きしません。
-
-## 音声パック
-
-公開リポジトリにはDFPWM本体を置きません。`audio/` 以下の `.dfpwm` は `.gitignore` 対象です。
-
-PC側で `audio/` の**中身**をUSTARとして固めます。
-
-```powershell
-tar --format=ustar -cf audio_pack.tar -C audio .
-```
-
-CC:Tweaked側:
-
-```text
-import_audio
-```
-
-その後 `audio_pack.tar` をComputer画面へドラッグ＆ドロップします。
-
-## 入力
+## 入力と状態
 
 既定例:
 
@@ -55,19 +35,17 @@ Normal Redstone (back)
 └─ RESET
 ```
 
-`NEXT` は停車列車の状態を進め、`PASSING` は状態を変えず通過放送をQueueへ投入します。
+停車列車は2状態です。
 
 ```text
 IDLE --approach--> PLATFORM --departure--> IDLE
 ```
 
-1列車につき既定では2回の `NEXT` パルスです。
+`PASSING` は状態を変えません。
 
 ## MTR / TSC metadata
 
-TSC HTTP APIを使う場合は `config.lua` のAdapterを `mtr` にします。
-
-Platform IDを手入力しなくても、**Station名 + Platform名の完全一致**で対象ホームを決められます。
+`config.lua` のAdapterを `mtr` にすると、TSC HTTP APIから列車情報を取得します。
 
 ```lua
 adapter = {
@@ -77,49 +55,20 @@ adapter = {
     mtr = {
         baseUrl = "http://127.0.0.1:8888",
         dimension = 0,
-
         stationName = "Tomakomai",
         platformName = "1",
-
-        -- Optional direct override.
         platformIdHex = "",
     },
 },
 ```
 
-処理:
-
-```text
-GET /mtr/api/map/stations-and-routes
-  -> stationName完全一致
-  -> station hex IDをRAM cache
-
-POST /mtr/api/map/arrivals
-  -> stationIdsHexで駅全体を問い合わせ
-  -> platformName完全一致
-  -> そのホームで最も早いArrivalResponseを使用
-```
-
-TSC名が `日本語|English` 形式なら、設定値は右側のEnglish名で一致できます。
-
-```text
-苫小牧|Tomakomai -> stationName = "Tomakomai"
-1                 -> platformName = "1"
-```
-
-大文字小文字を含め**完全一致**です。
-
-`platformIdHex` が空でなければ、従来どおりそのPlatform IDを直接使用し、`stationName` / `platformName` は無視します。
-
-### 取得するmetadata
-
-ArrivalResponseから以下を使います。
+ArrivalResponseから主に以下を使います。
 
 ```text
 routeNumber   -> class
 destination   -> destination
 isTerminating -> terminating
-routeId       -> routeId (exact decimal string)
+routeId       -> routeId
 ```
 
 名称はEnglish部分を音声asset IDへ正規化します。
@@ -130,76 +79,73 @@ routeId       -> routeId (exact decimal string)
 札幌|Sapporo         -> sapporo
 ```
 
-metadata取得成功時は次のようにログが出ます。
+## 音声ディレクトリ
 
 ```text
-[12:34 PM] : Metadata -> routeId=1234567890123456789 class=rapid destination=sapporo
+audio/
+├─ melody/
+│  ├─ approach.dfpwm
+│  ├─ arrival.dfpwm
+│  └─ departure.dfpwm
+├─ approach/
+│  ├─ soon.dfpwm
+│  ├─ train.dfpwm
+│  ├─ out_of_service_train.dfpwm
+│  ├─ passing_train.dfpwm
+│  └─ warning.dfpwm
+├─ destination/
+│  ├─ desu/
+│  │  └─ <destination>.dfpwm
+│  └─ mairimasu/
+│     └─ <destination>.dfpwm
+├─ station/
+│  └─ <destination>.dfpwm
+├─ track/
+│  ├─ ni/
+│  │  └─ <track>.dfpwm
+│  └─ wo/
+│     └─ <track>.dfpwm
+├─ class/
+│  └─ <class>.dfpwm
+├─ stopped/
+│  ├─ train.dfpwm
+│  └─ generic.dfpwm
+├─ next_train/
+│  ├─ intro.dfpwm
+│  ├─ train.dfpwm
+│  └─ generic.dfpwm
+├─ departure/
+│  └─ doors_closing.dfpwm
+└─ options/
 ```
 
-Route IDがない場合も `routeId=-` としてmetadata取得自体はログされます。
+### 行先音声
 
-## 行先音声の方針
-
-行先は、細かい助詞単位で分割せず、用途に応じた自然な発話単位を3種類持ちます。
+行先は用途ごとの自然な発話単位で持ちます。
 
 ```text
-audio/approach/destination/tomita.dfpwm
-→ 「富田行きが到着いたします。」
+audio/destination/mairimasu/tomita.dfpwm
+→ 接近放送用。「富田ゆきがまいります。」など
 
-audio/destination/tomita.dfpwm
-→ 「富田行きです。」
+audio/destination/desu/tomita.dfpwm
+→ 列車情報用。「富田ゆきです。」
 
 audio/station/tomita.dfpwm
-→ 「富田」
+→ 駅名単独。「富田」
 ```
 
-同じmetadataの `destination = tomita` に対して、放送用途ごとに同じファイル名 `tomita.dfpwm` を各ディレクトリから引きます。
+`approach_train_arrival` は `class + destination/mairimasu`、`train_info` は `class + destination/desu` を使います。
 
-旧 `audio/approach_destination/` と `audio/destination_sentence/` は標準パターンでは使用しません。既存ファイルはinstallerでも削除しません。
+### 番線音声
 
-## メロディ
-
-メロディは放送種別のディレクトリへ分散させず、`audio/melody/` にまとめます。
+番線音声は放送用途ではなく助詞で分けます。
 
 ```text
-audio/melody/approach.dfpwm  -> 接近放送の冒頭
-audio/melody/arrival.dfpwm   -> 接近放送末尾の到着メロディ
-audio/melody/departure.dfpwm -> 発車放送
+audio/track/ni/1.dfpwm -> 「1番線に」
+audio/track/wo/1.dfpwm -> 「1番線を」
 ```
 
-有効・無効は `config.lua` の `announcement.melody` で設定します。
-
-```lua
-announcement = {
-    melody = {
-        approachEnabled = true,
-        arrivalEnabled = false,
-        departureEnabled = true,
-    },
-
-    departure = {
-        doorsClosingEnabled = false,
-    },
-}
-```
-
-旧設定の `announcement.approach.melodyEnabled` と `announcement.approach.arrivalMelodyEnabled` も互換用fallbackとして読み取ります。旧configを保持したまま更新しても従来のON/OFF設定を引き継げます。
-
-## 番線音声
-
-番線音声は放送用途ではなく、日本語の助詞ごとに分けます。
-
-```text
-audio/track/ni/1.dfpwm
-→ 「1番線に」
-
-audio/track/wo/1.dfpwm
-→ 「1番線を」
-```
-
-標準segmentは `track_ni` と `track_wo` です。`track_ni` は接近放送だけに限定されないため、今後 `next_train` などで「n番線に」が必要になった場合にも同じ音声を再利用できます。
-
-旧 `approach_track`、`passing_track`、`track` segment はカスタムパターン互換用aliasとして残し、それぞれ `ni` / `wo` を参照します。
+標準segmentは `track_ni` / `track_wo` です。
 
 ## 接近放送
 
@@ -217,46 +163,15 @@ approach = {
 }
 ```
 
-MTR metadataと対応音声が揃っている場合、`approach_train_arrival` は次の2ファイルへ解決します。
-
-```text
-class + approach destination
-```
-
 例:
 
 ```text
-audio/class/local.dfpwm                         = 「普通」
-audio/approach/destination/tomita.dfpwm        = 「富田行きが到着いたします。」
-audio/approach/warning.dfpwm                   = 「危険ですので、黄色い点字ブロックまでお下がりください」
+まもなく / 1番線に / 普通 / 富田ゆきがまいります。 / 危険ですので…
 ```
 
-この場合の接近放送は次の構成です。
+metadata用音声が揃わない場合は `audio/approach/train.dfpwm` へfallbackします。
 
-```text
-まもなく / 1番線に / 普通 / 富田行きが到着いたします。 / 危険ですので…
-```
-
-行先から到着語尾までを1ファイルにまとめるため、接近放送ではクロスフェードやオーバーラップ再生を使用しません。
-
-回送列車も接近文を1ファイルにまとめます。
-
-```text
-audio/approach/out_of_service_train.dfpwm
-= 「回送列車が到着いたします。」
-```
-
-対応するclass / approach destination音声が揃わない場合は `train.dfpwm` へfallbackします。
-
-```text
-audio/approach/train.dfpwm = 「列車がまいります。」
-```
-
-fallback後も共通の `warning.dfpwm` を続けます。
-
-### 通過放送
-
-`passing` は状態を変えない独立イベントです。番線は「n番線を」の `track_wo` を使い、通過本文の後ろは接近放送と同じ汎用 `warning` を使います。
+## 通過放送
 
 標準パターン:
 
@@ -264,125 +179,165 @@ fallback後も共通の `warning.dfpwm` を続けます。
 passing = {
     "soon",
     "?track_wo",
-    "passing",
+    "passing_train",
     "warning",
 }
 ```
 
-音声例:
-
-```text
-audio/track/wo/1.dfpwm          = 「1番線を」
-audio/approach/passing.dfpwm    = 「列車が通過いたします。」
-audio/approach/warning.dfpwm    = 「危険ですので、黄色い点字ブロックまでお下がりください」
-```
-
-構成例:
+例:
 
 ```text
 まもなく / 1番線を / 列車が通過いたします。 / 危険ですので…
 ```
 
-旧 `audio/approach/passing_warning.dfpwm` は標準パターンでは使用しません。通過本文と汎用warningの内容が混ざっている可能性があるため、installerでは `passing.dfpwm` へ自動変換しません。
+```text
+audio/approach/passing_train.dfpwm
+→ 「列車が通過いたします。」
 
-## 次列車案内
+audio/approach/warning.dfpwm
+→ 接近・通過共通の警告文
+```
 
-`next_train` の `train_info` は次の2ファイルへ解決します。
+## 停車中の定期案内
+
+`stopped` は `PLATFORM` 状態で定期実行できる放送です。停止中でもTSC metadataを取得し、接近時と同じ列車情報cacheを利用できます。
+
+標準パターン:
+
+```lua
+stopped = {
+    "?track_ni",
+    "?stopped_train_info|stopped_generic",
+    "?route_options",
+}
+```
+
+`stopped_train_info` は次の3音声へ解決します。
 
 ```text
-class + destination
+audio/stopped/train.dfpwm
++ audio/class/<class>.dfpwm
++ audio/destination/desu/<destination>.dfpwm
 ```
 
 例:
 
 ```text
-audio/class/local.dfpwm        = 「普通」
-audio/destination/tomita.dfpwm = 「富田行きです。」
+1番線に / 停車中の列車は / 普通 / 富田ゆきです。
 ```
 
-したがって `next_train/intro.dfpwm` を「次の列車は」のような文にすれば、
+推奨内容:
 
 ```text
-次の列車は / 普通 / 富田行きです。
+audio/stopped/train.dfpwm   -> 「停車中の列車は」
+audio/stopped/generic.dfpwm -> metadataがない場合の任意fallback
 ```
 
-のように構成できます。
+既定では定期放送はOFFです。有効化する場合は保持されている `config.lua` を編集します。
 
-`station_name`、`destination_sentence`、`approach_destination` はそれぞれ動的segmentとして定義してあり、今後のmetadata対応パターンから単独でも利用できます。
-
-## 音声ファイル
-
-```text
-audio/
-├─ melody/
-│  ├─ approach.dfpwm
-│  ├─ arrival.dfpwm
-│  └─ departure.dfpwm
-├─ approach/
-│  ├─ soon.dfpwm
-│  ├─ train.dfpwm
-│  ├─ out_of_service_train.dfpwm
-│  ├─ passing.dfpwm
-│  ├─ warning.dfpwm
-│  └─ destination/
-│     └─ <destination>.dfpwm
-├─ destination/
-│  └─ <destination>.dfpwm
-├─ station/
-│  └─ <destination>.dfpwm
-├─ departure/
-│  └─ doors_closing.dfpwm
-├─ stopped/
-│  └─ notice.dfpwm
-├─ next_train/
-│  ├─ intro.dfpwm
-│  └─ generic.dfpwm
-├─ track/
-│  ├─ ni/
-│  │  └─ <track>.dfpwm
-│  └─ wo/
-│     └─ <track>.dfpwm
-├─ class/
-└─ options/
+```lua
+periodic = {
+    stopped = {
+        enabled = true,
+        state = "PLATFORM",
+        type = "stopped",
+        initialDelayMs = 30000,
+        intervalMs = 30000,
+    },
+}
 ```
 
-旧配置はinstaller実行時に、移行先が空いている場合だけ次のように移動します。
+## 次列車案内
+
+標準パターン:
+
+```lua
+next_train = {
+    "next_train_intro",
+    "?track_ni",
+    "?next_train_info|next_train_generic",
+    "?route_options",
+}
+```
+
+`next_train_info` は次の3音声へ解決します。
 
 ```text
-audio/approach/melody.dfpwm       -> audio/melody/approach.dfpwm
-audio/arrival/melody.dfpwm        -> audio/melody/arrival.dfpwm
-audio/departure/melody.dfpwm      -> audio/melody/departure.dfpwm
-audio/track/<track>.dfpwm         -> audio/track/ni/<track>.dfpwm
-audio/track/approach/<track>.dfpwm -> audio/track/ni/<track>.dfpwm
-audio/track/passing/<track>.dfpwm -> audio/track/wo/<track>.dfpwm
+audio/next_train/train.dfpwm
++ audio/class/<class>.dfpwm
++ audio/destination/desu/<destination>.dfpwm
+```
+
+例:
+
+```text
+次に / 1番線に / まいります列車は / 普通 / 富田ゆきです。
+```
+
+推奨内容:
+
+```text
+audio/next_train/intro.dfpwm -> 「次に」
+audio/next_train/train.dfpwm -> 「まいります列車は」
+audio/next_train/generic.dfpwm -> metadataがない場合の任意fallback
+```
+
+既定では `next_train` の定期放送もOFFです。有効化する場合:
+
+```lua
+periodic = {
+    nextTrain = {
+        enabled = true,
+        state = "IDLE",
+        type = "next_train",
+        initialDelayMs = 60000,
+        intervalMs = 60000,
+    },
+}
+```
+
+## 旧音声の自動移行
+
+installerは移行先に同名ファイルがない場合だけ旧配置を移動します。
+
+```text
+audio/approach/melody.dfpwm        -> audio/melody/approach.dfpwm
+audio/arrival/melody.dfpwm         -> audio/melody/arrival.dfpwm
+audio/departure/melody.dfpwm       -> audio/melody/departure.dfpwm
+audio/approach/passing.dfpwm       -> audio/approach/passing_train.dfpwm
+
+audio/approach/destination/*.dfpwm -> audio/destination/mairimasu/*.dfpwm
+audio/approach_destination/*.dfpwm -> audio/destination/mairimasu/*.dfpwm
+audio/destination/*.dfpwm          -> audio/destination/desu/*.dfpwm
+audio/destination_sentence/*.dfpwm -> audio/destination/desu/*.dfpwm
+
+audio/track/*.dfpwm                -> audio/track/ni/*.dfpwm
+audio/track/approach/*.dfpwm       -> audio/track/ni/*.dfpwm
+audio/track/passing/*.dfpwm        -> audio/track/wo/*.dfpwm
+```
+
+`audio/stopped/notice.dfpwm` は内容が不明なため `train.dfpwm` へ自動移行しません。必要なら手動で録音・配置してください。
+
+## 音声パック
+
+公開リポジトリにはDFPWM本体を置きません。`audio/` 以下の `.dfpwm` は `.gitignore` 対象です。
+
+PC側で `audio/` の中身をUSTARとして固めます。
+
+```powershell
+tar --format=ustar -cf audio_pack.tar -C audio .
+```
+
+CC:Tweaked側:
+
+```text
+import_audio
 ```
 
 推奨DFPWMは mono / 48 kHzです。
 
-例:
-
 ```bash
 ffmpeg -i input.wav -ac 1 -ar 48000 -c:a dfpwm output.dfpwm
-```
-
-## セグメント間の連続再生
-
-通常セグメント間には人工的な待機を入れません。
-
-Playerは隣接するDFPWMをファイル単位で再生終了させず、各ファイルを**別々のDFPWM decoderでPCM化した後、PCMを1本の連続streamへ結合**します。
-
-```text
-local.dfpwm                         --decode--\
-approach/destination/tomita.dfpwm --decode---+-> continuous PCM -> Speaker
-warning.dfpwm                       --decode--/
-```
-
-DFPWM decoderはファイルごとに作り直すためstream stateを混ぜません。一方、Speakerへ渡すPCMはファイル境界を跨いで最大 `128 * 1024` samplesまでまとめます。
-
-明示的に間を入れたい場合だけ、パターンで以下を使えます。
-
-```text
-@pause:0.3
 ```
 
 ## Route別オプション放送
@@ -399,15 +354,6 @@ return {
 }
 ```
 
-実ファイルは `announcement_patterns/segments.lua` に定義します。
-
-```lua
-airport_access = {
-    kind = "file",
-    path = "audio/options/airport_access.dfpwm",
-},
-```
-
 ## 優先度 / 割り込み
 
 既定priority:
@@ -420,7 +366,7 @@ airport_access = {
  10  next_train
 ```
 
-高priority requestが来た場合、低priority放送はSpeakerを停止して中断します。明示pause中も割り込み可能です。
+高priority requestは低priority放送を中断できます。
 
 ## コード規約
 

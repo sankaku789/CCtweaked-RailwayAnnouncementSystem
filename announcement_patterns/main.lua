@@ -22,7 +22,7 @@ return {
     passing = {
         "soon",
         "?track_wo",
-        "passing",
+        "passing_train",
         "warning",
     },
 
@@ -32,15 +32,15 @@ return {
     },
 
     stopped = {
-        "?track_ni"
-        "train",
-        "approach_train_arrival",
-        ""
+        "?track_ni",
+        "?stopped_train_info|stopped_generic",
+        "?route_options",
     },
 
     next_train = {
         "next_train_intro",
-        "train_info|next_train_generic",
+        "?track_ni",
+        "?next_train_info|next_train_generic",
         "?route_options",
     },
 }

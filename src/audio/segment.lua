@@ -132,11 +132,22 @@ function Segment:_resolveDestination(definition, context)
     return nil
 end
 
--- function: Resolve class and one destination phrase variant as train information.
+-- function: Resolve an optional fixed prefix, class, and destination phrase as train information.
 function Segment:_resolveTrainInfo(definition, context)
     local metadata = context and context.metadata or nil
     if type(metadata) ~= "table" then
         return nil
+    end
+
+    local prefixPath = definition.prefixPath
+    if prefixPath ~= nil then
+        if type(prefixPath) ~= "string" or prefixPath == "" then
+            error("train_info prefixPath must be a non-empty string")
+        end
+
+        if not self:exists(prefixPath) then
+            return nil
+        end
     end
 
     local classPath = self:fromId(definition.classDirectory, metadata.class)
@@ -146,7 +157,14 @@ function Segment:_resolveTrainInfo(definition, context)
         return nil
     end
 
-    return { classPath, destinationPath }
+    local output = {}
+    if prefixPath then
+        output[#output + 1] = prefixPath
+    end
+    output[#output + 1] = classPath
+    output[#output + 1] = destinationPath
+
+    return output
 end
 
 -- function: Resolve route-specific optional segment IDs for the current announcement type.

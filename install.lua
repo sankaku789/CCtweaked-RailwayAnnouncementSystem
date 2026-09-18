@@ -44,7 +44,6 @@ local REFRESHABLE_PATTERN_FILES = {
 local AUDIO_DIRECTORIES = {
     "audio/melody",
     "audio/approach",
-    "audio/approach/destination",
     "audio/departure",
     "audio/stopped",
     "audio/next_train",
@@ -53,6 +52,8 @@ local AUDIO_DIRECTORIES = {
     "audio/track/wo",
     "audio/class",
     "audio/destination",
+    "audio/destination/desu",
+    "audio/destination/mairimasu",
     "audio/station",
     "audio/options",
 }
@@ -99,6 +100,10 @@ local LEGACY_AUDIO_FILES = {
     {
         source = "audio/departure/melody.dfpwm",
         target = "audio/melody/departure.dfpwm",
+    },
+    {
+        source = "audio/approach/passing.dfpwm",
+        target = "audio/approach/passing_train.dfpwm",
     },
 }
 
@@ -255,8 +260,8 @@ local function migrateLegacyAudioFiles()
     end
 end
 
--- function: Move DFPWM track files from one legacy directory into one grammatical-particle directory.
-local function migrateTrackDirectory(sourceRepositoryPath, targetRepositoryPath)
+-- function: Move DFPWM files between audio directories without overwriting existing targets.
+local function migrateDfpwmDirectory(sourceRepositoryPath, targetRepositoryPath, label)
     local sourceDirectory = targetPath(sourceRepositoryPath)
     if not fs.exists(sourceDirectory) or not fs.isDir(sourceDirectory) then
         return
@@ -271,11 +276,12 @@ local function migrateTrackDirectory(sourceRepositoryPath, targetRepositoryPath)
             local target = fs.combine(targetDirectory, name)
 
             if fs.exists(target) then
-                print("Keep legacy track -> " .. sourceRepositoryPath .. "/" .. name)
+                print(("Keep legacy %s -> %s/%s"):format(label, sourceRepositoryPath, name))
             else
                 ensureDirectory(targetDirectory)
                 fs.move(source, target)
-                print(("Migrate track -> %s/%s -> %s/%s"):format(
+                print(("Migrate %s -> %s/%s -> %s/%s"):format(
+                    label,
                     sourceRepositoryPath,
                     name,
                     targetRepositoryPath,
@@ -286,11 +292,31 @@ local function migrateTrackDirectory(sourceRepositoryPath, targetRepositoryPath)
     end
 end
 
+-- function: Move legacy destination variants into desu and mairimasu directories.
+local function migrateLegacyDestinationFiles()
+    migrateDfpwmDirectory("audio/approach/destination", "audio/destination/mairimasu", "destination")
+    migrateDfpwmDirectory("audio/approach_destination", "audio/destination/mairimasu", "destination")
+    migrateDfpwmDirectory("audio/destination_sentence", "audio/destination/desu", "destination")
+    migrateDfpwmDirectory("audio/destination", "audio/destination/desu", "destination")
+
+    for _, repositoryPath in ipairs({
+        "audio/approach/destination",
+        "audio/approach_destination",
+        "audio/destination_sentence",
+    }) do
+        local path = targetPath(repositoryPath)
+        if fs.exists(path) and fs.isDir(path) and #fs.list(path) == 0 then
+            fs.delete(path)
+            print("Remove legacy destination dir -> " .. repositoryPath .. "/")
+        end
+    end
+end
+
 -- function: Move legacy track audio files into ni and wo directories without overwriting current assets.
 local function migrateLegacyTrackFiles()
-    migrateTrackDirectory("audio/track/approach", "audio/track/ni")
-    migrateTrackDirectory("audio/track/passing", "audio/track/wo")
-    migrateTrackDirectory("audio/track", "audio/track/ni")
+    migrateDfpwmDirectory("audio/track/approach", "audio/track/ni", "track")
+    migrateDfpwmDirectory("audio/track/passing", "audio/track/wo", "track")
+    migrateDfpwmDirectory("audio/track", "audio/track/ni", "track")
 
     for _, repositoryPath in ipairs({ "audio/track/approach", "audio/track/passing" }) do
         local path = targetPath(repositoryPath)
@@ -342,6 +368,7 @@ local function install()
 
     migrateLegacyPatternFiles()
     migrateLegacyAudioFiles()
+    migrateLegacyDestinationFiles()
     migrateLegacyTrackFiles()
 
     for _, repositoryPath in ipairs(RUNTIME_FILES) do

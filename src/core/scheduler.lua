@@ -230,7 +230,10 @@ end
 
 -- function: Return metadata only for announcement types that require train information.
 function Scheduler:_metadataFor(request)
-    if request.type == "approach" or request.type == "next_train" then
+    if request.type == "approach"
+        or request.type == "stopped"
+        or request.type == "next_train"
+    then
         return self.metadataProvider:get(request)
     end
 

@@ -49,26 +49,26 @@ return {
         kind = "dynamic",
         resolver = "train_info",
         classDirectory = "audio/class",
-        destinationDirectory = "audio/approach/destination",
+        destinationDirectory = "audio/destination/mairimasu",
     },
 
     train_info = {
         kind = "dynamic",
         resolver = "train_info",
         classDirectory = "audio/class",
-        destinationDirectory = "audio/destination",
+        destinationDirectory = "audio/destination/desu",
     },
 
     approach_destination = {
         kind = "dynamic",
         resolver = "destination",
-        directory = "audio/destination/mairimasu/",
+        directory = "audio/destination/mairimasu",
     },
 
     destination_sentence = {
         kind = "dynamic",
         resolver = "destination",
-        directory = "audio/destination",
+        directory = "audio/destination/desu",
     },
 
     station_name = {
@@ -93,6 +93,12 @@ return {
     },
 
     passing_train = {
+        kind = "file",
+        path = "audio/approach/passing_train.dfpwm",
+    },
+
+    -- Legacy alias for custom patterns using the previous passing segment name.
+    passing = {
         kind = "file",
         path = "audio/approach/passing_train.dfpwm",
     },
@@ -127,14 +133,36 @@ return {
         enabled = "announcement.departure.doorsClosingEnabled",
     },
 
+    stopped_train_info = {
+        kind = "dynamic",
+        resolver = "train_info",
+        prefixPath = "audio/stopped/train.dfpwm",
+        classDirectory = "audio/class",
+        destinationDirectory = "audio/destination/desu",
+    },
+
+    -- Legacy fixed segment for custom stopped patterns.
     stopped_notice = {
         kind = "file",
         path = "audio/stopped/train.dfpwm",
     },
 
+    stopped_generic = {
+        kind = "file",
+        path = "audio/stopped/generic.dfpwm",
+    },
+
     next_train_intro = {
         kind = "file",
         path = "audio/next_train/intro.dfpwm",
+    },
+
+    next_train_info = {
+        kind = "dynamic",
+        resolver = "train_info",
+        prefixPath = "audio/next_train/train.dfpwm",
+        classDirectory = "audio/class",
+        destinationDirectory = "audio/destination/desu",
     },
 
     next_train_generic = {
