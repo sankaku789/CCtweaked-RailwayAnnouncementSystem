@@ -22,7 +22,7 @@ wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncem
 
 `--refresh-patterns` でも `config.lua`、`announcement_patterns/route_options.lua`、DFPWM音声は保持されます。
 
-旧ディレクトリ構成のメロディ音声がある場合、installerは新しい配置へ自動移行します。旧 `audio/track/*.dfpwm` は接近用の `audio/track/approach/` へ移行します。移行先に同名ファイルが既にある場合は上書きしません。
+旧ディレクトリ構成のメロディ音声がある場合、installerは新しい配置へ自動移行します。旧 `audio/track/*.dfpwm` と `audio/track/approach/*.dfpwm` は `audio/track/ni/`、旧 `audio/track/passing/*.dfpwm` は `audio/track/wo/` へ移行します。移行先に同名ファイルが既にある場合は上書きしません。
 
 ## 音声パック
 
@@ -187,17 +187,19 @@ announcement = {
 
 ## 番線音声
 
-接近放送と通過放送では助詞が異なるため、番線音声を用途別に分けます。
+番線音声は放送用途ではなく、日本語の助詞ごとに分けます。
 
 ```text
-audio/track/approach/1.dfpwm
+audio/track/ni/1.dfpwm
 → 「1番線に」
 
-audio/track/passing/1.dfpwm
+audio/track/wo/1.dfpwm
 → 「1番線を」
 ```
 
-標準パターンでは `approach_track` と `passing_track` を使い分けます。旧 `track` segment はカスタムパターン互換用として `audio/track/approach/` を参照します。
+標準segmentは `track_ni` と `track_wo` です。`track_ni` は接近放送だけに限定されないため、今後 `next_train` などで「n番線に」が必要になった場合にも同じ音声を再利用できます。
+
+旧 `approach_track`、`passing_track`、`track` segment はカスタムパターン互換用aliasとして残し、それぞれ `ni` / `wo` を参照します。
 
 ## 接近放送
 
@@ -207,7 +209,7 @@ audio/track/passing/1.dfpwm
 approach = {
     "?approach_melody",
     "soon",
-    "?approach_track",
+    "?track_ni",
     "approach_train_arrival|train",
     "warning",
     "?arrival_melody",
@@ -254,14 +256,14 @@ fallback後も共通の `warning.dfpwm` を続けます。
 
 ### 通過放送
 
-`passing` は状態を変えない独立イベントです。番線は通過用の `passing_track` を使い、通過本文の後ろは接近放送と同じ汎用 `warning` を使います。
+`passing` は状態を変えない独立イベントです。番線は「n番線を」の `track_wo` を使い、通過本文の後ろは接近放送と同じ汎用 `warning` を使います。
 
 標準パターン:
 
 ```lua
 passing = {
     "soon",
-    "?passing_track",
+    "?track_wo",
     "passing",
     "warning",
 }
@@ -270,9 +272,9 @@ passing = {
 音声例:
 
 ```text
-audio/track/passing/1.dfpwm = 「1番線を」
-audio/approach/passing.dfpwm = 「列車が通過いたします。」
-audio/approach/warning.dfpwm = 「危険ですので、黄色い点字ブロックまでお下がりください」
+audio/track/wo/1.dfpwm          = 「1番線を」
+audio/approach/passing.dfpwm    = 「列車が通過いたします。」
+audio/approach/warning.dfpwm    = 「危険ですので、黄色い点字ブロックまでお下がりください」
 ```
 
 構成例:
@@ -336,9 +338,9 @@ audio/
 │  ├─ intro.dfpwm
 │  └─ generic.dfpwm
 ├─ track/
-│  ├─ approach/
+│  ├─ ni/
 │  │  └─ <track>.dfpwm
-│  └─ passing/
+│  └─ wo/
 │     └─ <track>.dfpwm
 ├─ class/
 └─ options/
@@ -347,10 +349,12 @@ audio/
 旧配置はinstaller実行時に、移行先が空いている場合だけ次のように移動します。
 
 ```text
-audio/approach/melody.dfpwm  -> audio/melody/approach.dfpwm
-audio/arrival/melody.dfpwm   -> audio/melody/arrival.dfpwm
-audio/departure/melody.dfpwm -> audio/melody/departure.dfpwm
-audio/track/<track>.dfpwm    -> audio/track/approach/<track>.dfpwm
+audio/approach/melody.dfpwm       -> audio/melody/approach.dfpwm
+audio/arrival/melody.dfpwm        -> audio/melody/arrival.dfpwm
+audio/departure/melody.dfpwm      -> audio/melody/departure.dfpwm
+audio/track/<track>.dfpwm         -> audio/track/ni/<track>.dfpwm
+audio/track/approach/<track>.dfpwm -> audio/track/ni/<track>.dfpwm
+audio/track/passing/<track>.dfpwm -> audio/track/wo/<track>.dfpwm
 ```
 
 推奨DFPWMは mono / 48 kHzです。

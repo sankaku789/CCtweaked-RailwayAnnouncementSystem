@@ -2,7 +2,7 @@ return {
     approach = {
         "?approach_melody",
         "soon",
-        "?approach_track",
+        "?track_ni",
         "approach_train_arrival|train",
         "warning",
         "?arrival_melody",
@@ -12,7 +12,7 @@ return {
     approach_out_of_service = {
         "?approach_melody",
         "soon",
-        "?approach_track",
+        "?track_ni",
         "out_of_service_train",
         "warning",
         "?arrival_melody",
@@ -21,7 +21,7 @@ return {
 
     passing = {
         "soon",
-        "?passing_track",
+        "?track_wo",
         "passing",
         "warning",
     },

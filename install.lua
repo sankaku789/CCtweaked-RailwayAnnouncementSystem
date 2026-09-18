@@ -49,8 +49,8 @@ local AUDIO_DIRECTORIES = {
     "audio/stopped",
     "audio/next_train",
     "audio/track",
-    "audio/track/approach",
-    "audio/track/passing",
+    "audio/track/ni",
+    "audio/track/wo",
     "audio/class",
     "audio/destination",
     "audio/station",
@@ -255,14 +255,14 @@ local function migrateLegacyAudioFiles()
     end
 end
 
--- function: Move root-level legacy track audio files into the approach track variant directory.
-local function migrateLegacyTrackFiles()
-    local sourceDirectory = targetPath("audio/track")
+-- function: Move DFPWM track files from one legacy directory into one grammatical-particle directory.
+local function migrateTrackDirectory(sourceRepositoryPath, targetRepositoryPath)
+    local sourceDirectory = targetPath(sourceRepositoryPath)
     if not fs.exists(sourceDirectory) or not fs.isDir(sourceDirectory) then
         return
     end
 
-    local targetDirectory = targetPath("audio/track/approach")
+    local targetDirectory = targetPath(targetRepositoryPath)
 
     for _, name in ipairs(fs.list(sourceDirectory)) do
         local source = fs.combine(sourceDirectory, name)
@@ -271,12 +271,32 @@ local function migrateLegacyTrackFiles()
             local target = fs.combine(targetDirectory, name)
 
             if fs.exists(target) then
-                print("Keep legacy track -> audio/track/" .. name)
+                print("Keep legacy track -> " .. sourceRepositoryPath .. "/" .. name)
             else
                 ensureDirectory(targetDirectory)
                 fs.move(source, target)
-                print(("Migrate track -> audio/track/%s -> audio/track/approach/%s"):format(name, name))
+                print(("Migrate track -> %s/%s -> %s/%s"):format(
+                    sourceRepositoryPath,
+                    name,
+                    targetRepositoryPath,
+                    name
+                ))
             end
+        end
+    end
+end
+
+-- function: Move legacy track audio files into ni and wo directories without overwriting current assets.
+local function migrateLegacyTrackFiles()
+    migrateTrackDirectory("audio/track/approach", "audio/track/ni")
+    migrateTrackDirectory("audio/track/passing", "audio/track/wo")
+    migrateTrackDirectory("audio/track", "audio/track/ni")
+
+    for _, repositoryPath in ipairs({ "audio/track/approach", "audio/track/passing" }) do
+        local path = targetPath(repositoryPath)
+        if fs.exists(path) and fs.isDir(path) and #fs.list(path) == 0 then
+            fs.delete(path)
+            print("Remove legacy track dir -> " .. repositoryPath .. "/")
         end
     end
 end

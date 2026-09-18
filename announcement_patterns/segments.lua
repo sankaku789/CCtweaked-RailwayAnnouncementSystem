@@ -14,23 +14,35 @@ return {
         path = "audio/approach/soon.dfpwm",
     },
 
+    track_ni = {
+        kind = "dynamic",
+        resolver = "track",
+        directory = "audio/track/ni",
+    },
+
+    track_wo = {
+        kind = "dynamic",
+        resolver = "track",
+        directory = "audio/track/wo",
+    },
+
+    -- Legacy aliases for custom patterns using the previous track segment names.
     approach_track = {
         kind = "dynamic",
         resolver = "track",
-        directory = "audio/track/approach",
+        directory = "audio/track/ni",
     },
 
     passing_track = {
         kind = "dynamic",
         resolver = "track",
-        directory = "audio/track/passing",
+        directory = "audio/track/wo",
     },
 
-    -- Legacy alias for custom patterns that still reference track.
     track = {
         kind = "dynamic",
         resolver = "track",
-        directory = "audio/track/approach",
+        directory = "audio/track/ni",
     },
 
     approach_train_arrival = {
