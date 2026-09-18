@@ -32,7 +32,10 @@ return {
     },
 
     stopped = {
-        "stopped_notice",
+        "?track_ni"
+        "train",
+        "approach_train_arrival",
+        ""
     },
 
     next_train = {

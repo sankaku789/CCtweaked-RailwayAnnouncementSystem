@@ -129,7 +129,7 @@ return {
 
     stopped_notice = {
         kind = "file",
-        path = "audio/stopped/notice.dfpwm",
+        path = "audio/stopped/train.dfpwm",
     },
 
     next_train_intro = {
