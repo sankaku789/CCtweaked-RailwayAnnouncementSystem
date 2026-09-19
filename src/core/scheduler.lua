@@ -246,11 +246,14 @@ function Scheduler:processQueue()
     while true do
         local request = self.queue:waitPop()
         local metadata = self:_metadataFor(request)
-        local segments = self.composer:compose(request, metadata)
+        local segments, diagnostics = self.composer:compose(request, metadata)
 
         if #segments == 0 then
             if self.logger then
                 self.logger.warn("Announcement has no playable segments: " .. tostring(request.type))
+                for _, diagnostic in ipairs(diagnostics or {}) do
+                    self.logger.warn("  - " .. tostring(diagnostic))
+                end
             end
         else
             if self.logger then
