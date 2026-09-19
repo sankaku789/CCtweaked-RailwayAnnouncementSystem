@@ -89,6 +89,11 @@ return {
 
     announcement = {
         melody = {
+            -- Paths are relative to audio/melody and may include subdirectories.
+            approachPath = "approach.dfpwm",
+            arrivalPath = "arrival.dfpwm",
+            departurePath = "departure.dfpwm",
+
             approachEnabled = true,
             arrivalEnabled = false,
             departureEnabled = true,
