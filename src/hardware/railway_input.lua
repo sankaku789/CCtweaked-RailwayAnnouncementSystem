@@ -6,12 +6,7 @@ local function bundledActive(mask, color)
     return type(color) == "number" and colors.test(mask, color)
 end
 
--- function: Append one logical input event to a FIFO list.
-local function push(list, value)
-    list[#list + 1] = value
-end
-
--- function: Create a railway input monitor for bundled signals and a direct reset button.
+-- function: Create a railway input monitor for two bundled pulse lines and a direct reset button.
 function RailwayInput.new(options)
     options = options or {}
 
@@ -20,9 +15,15 @@ function RailwayInput.new(options)
     local reset = options.reset or {}
 
     assert(type(bundled.side) == "string", "input.bundled.side must be a string")
-    assert(type(signals.next) == "number", "input.bundled.signals.next must be a color")
-    assert(type(signals.passing) == "number", "input.bundled.signals.passing must be a color")
-    assert(signals.next ~= signals.passing, "NEXT and PASSING bundled colors must be different")
+    assert(type(signals.approach) == "number", "input.bundled.signals.approach must be a color")
+    assert(type(signals.departure) == "number", "input.bundled.signals.departure must be a color")
+    assert(signals.approach ~= signals.departure, "APPROACH and DEPARTURE bundled colors must be different")
+
+    local syncDelaySeconds = tonumber(bundled.syncDelaySeconds)
+    if syncDelaySeconds == nil then
+        syncDelaySeconds = 0.05
+    end
+    assert(syncDelaySeconds >= 0, "input.bundled.syncDelaySeconds must be non-negative")
 
     if reset.side ~= nil then
         assert(type(reset.side) == "string", "input.reset.side must be a string")
@@ -30,51 +31,83 @@ function RailwayInput.new(options)
 
     return setmetatable({
         bundledSide = bundled.side,
-        nextColor = signals.next,
-        passingColor = signals.passing,
+        approachColor = signals.approach,
+        departureColor = signals.departure,
+        syncDelaySeconds = syncDelaySeconds,
         resetSide = reset.side,
-        lastBundled = redstone.getBundledInput(bundled.side),
         lastReset = reset.side and redstone.getInput(reset.side) or false,
-        pending = {},
+        armed = true,
     }, RailwayInput)
 end
 
--- function: Capture rising edges from bundled NEXT/PASSING signals and the reset button.
-function RailwayInput:_captureEdges()
-    local currentBundled = redstone.getBundledInput(self.bundledSide)
-    local currentReset = self.resetSide and redstone.getInput(self.resetSide) or false
+-- function: Read one bundled pulse code as approach, departure, passing, or idle.
+function RailwayInput:_readPulse()
+    local mask = redstone.getBundledInput(self.bundledSide)
+    local approach = bundledActive(mask, self.approachColor)
+    local departure = bundledActive(mask, self.departureColor)
 
-    local nextRising = bundledActive(currentBundled, self.nextColor)
-        and not bundledActive(self.lastBundled, self.nextColor)
-    local passingRising = bundledActive(currentBundled, self.passingColor)
-        and not bundledActive(self.lastBundled, self.passingColor)
-    local resetRising = currentReset and not self.lastReset
-
-    self.lastBundled = currentBundled
-    self.lastReset = currentReset
-
-    -- Reset is processed first if multiple inputs rise in the same redstone event.
-    if resetRising then
-        push(self.pending, "reset")
+    if approach and departure then
+        return "passing"
+    elseif approach then
+        return "approach"
+    elseif departure then
+        return "departure"
     end
 
-    if passingRising then
-        push(self.pending, "passing")
+    return nil
+end
+
+-- function: Detect a rising edge from the direct reset input.
+function RailwayInput:_readResetRising()
+    local current = self.resetSide and redstone.getInput(self.resetSide) or false
+    local rising = current and not self.lastReset
+    self.lastReset = current
+    return rising
+end
+
+-- function: Sample one logical input event and re-arm bundled pulse detection after idle.
+function RailwayInput:_sample()
+    if self:_readResetRising() then
+        return "reset"
     end
 
-    if nextRising then
-        push(self.pending, "next")
+    local pulse = self:_readPulse()
+    if pulse == nil then
+        self.armed = true
+        return nil
     end
+
+    if not self.armed then
+        return nil
+    end
+
+    if self.syncDelaySeconds > 0 then
+        sleep(self.syncDelaySeconds)
+
+        if self:_readResetRising() then
+            return "reset"
+        end
+
+        pulse = self:_readPulse()
+        if pulse == nil then
+            return nil
+        end
+    end
+
+    self.armed = false
+    return pulse
 end
 
 -- function: Wait for and return the next logical railway input event.
 function RailwayInput:waitForEvent()
-    while #self.pending == 0 do
-        os.pullEvent("redstone")
-        self:_captureEdges()
-    end
+    while true do
+        local event = self:_sample()
+        if event then
+            return event
+        end
 
-    return table.remove(self.pending, 1)
+        os.pullEvent("redstone")
+    end
 end
 
 return RailwayInput
