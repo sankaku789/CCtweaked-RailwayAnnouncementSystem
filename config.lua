@@ -1,6 +1,13 @@
 return {
     trackNumber = 1,
 
+    runtime = {
+        -- Restart after unexpected application failures, but stop repeated crash loops.
+        restartDelaySeconds = 5,
+        stableRunSeconds = 60,
+        maxConsecutiveFailures = 5,
+    },
+
     input = {
         bundled = {
             side = "top",
