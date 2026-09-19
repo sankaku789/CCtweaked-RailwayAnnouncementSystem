@@ -356,21 +356,19 @@ approach = {
 }
 ```
 
-`announcement_patterns/route_options.lua` ではRoute ID、放送種別、slot名の順に内容を定義します。
+`announcement_patterns/route_options.lua` ではRoute IDの直下にslot名と内容を定義します。
 
 ```lua
 return {
     ["1234567890123456789"] = {
-        approach = {
-            sample = {
-                "airport_access",
-            },
+        sample = {
+            "airport_access",
         },
     },
 }
 ```
 
-slotが未定義の場合は何も挿入しません。slot内では通常のDSL entryと同じく `?`、`|`、compositeを利用できます。
+slotが未定義の場合は何も挿入しません。slot内では通常のDSL entryと同じく `?`、`|`、compositeを利用できます。同じslot名を複数の放送パターンで使う場合は同じ内容が挿入されるため、内容を分けたい場合は別のslot名を使用します。
 
 ## 優先度 / 割り込み
 
