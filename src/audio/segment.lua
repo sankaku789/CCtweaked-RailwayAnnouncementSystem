@@ -32,6 +32,31 @@ local function readConfigPath(root, path)
     return value
 end
 
+-- function: Normalize a configured path while rejecting absolute and parent-relative paths.
+local function normalizeRelativePath(value)
+    if type(value) ~= "string" or value == "" then
+        return nil
+    end
+
+    if value:find("\\", 1, true) or value:sub(1, 1) == "/" or value:match("^%a:") then
+        return nil
+    end
+
+    local parts = {}
+    for part in value:gmatch("[^/]+") do
+        if part == "." or part == ".." then
+            return nil
+        end
+        parts[#parts + 1] = part
+    end
+
+    if #parts == 0 then
+        return nil
+    end
+
+    return table.concat(parts, "/")
+end
+
 -- function: Create a semantic announcement segment resolver.
 function Segment.new(config, definitions)
     return setmetatable({
@@ -135,14 +160,44 @@ function Segment:_resolveDestination(definition, context)
     return nil
 end
 
+-- function: Resolve a configured relative DFPWM path inside a fixed audio directory.
+function Segment:_resolveConfigPath(definition, requirePlayable)
+    if type(definition.directory) ~= "string" or definition.directory == "" then
+        error("config path resolver directory is not configured")
+    end
+
+    if type(definition.configPath) ~= "string" or definition.configPath == "" then
+        error("config path resolver configPath is not configured")
+    end
+
+    local value = readConfigPath(self.config, definition.configPath)
+    if value == nil or value == "" then
+        value = definition.defaultPath
+    end
+
+    local relativePath = normalizeRelativePath(value)
+    if not relativePath or relativePath:lower():sub(-6) ~= ".dfpwm" then
+        error("configured audio path must be a relative .dfpwm path: " .. tostring(value))
+    end
+
+    local path = fs.combine(definition.directory, relativePath)
+    if requirePlayable and not self:exists(path) then
+        return nil
+    end
+
+    return { path }
+end
+
 -- function: Resolve a named dynamic segment into audio file paths.
-function Segment:_resolveDynamic(definition, context)
+function Segment:_resolveDynamic(definition, context, requirePlayable)
     if definition.resolver == "track" then
         return self:_resolveTrack(definition, context)
     elseif definition.resolver == "class" then
         return self:_resolveClass(definition, context)
     elseif definition.resolver == "destination" then
         return self:_resolveDestination(definition, context)
+    elseif definition.resolver == "config_path" then
+        return self:_resolveConfigPath(definition, requirePlayable)
     end
 
     error("unknown dynamic segment resolver: " .. tostring(definition.resolver))
@@ -189,7 +244,7 @@ function Segment:resolve(id, context, requirePlayable)
         return { definition.path }
     end
 
-    return self:_resolveDynamic(definition, context)
+    return self:_resolveDynamic(definition, context, requirePlayable)
 end
 
 return Segment
