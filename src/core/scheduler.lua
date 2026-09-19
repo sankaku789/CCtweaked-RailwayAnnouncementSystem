@@ -118,32 +118,34 @@ function Scheduler:_enqueue(typeName)
     return true
 end
 
--- function: Handle a NEXT bundled signal and advance the stopping-train state machine.
-function Scheduler:_handleNext()
-    local transition = self.trackState:advance()
+-- function: Handle an APPROACH pulse and explicitly mark the track as occupied.
+function Scheduler:_handleApproach()
+    local previous = self.trackState:get()
+    self.trackState:set("PLATFORM")
 
     if self.logger then
-        self.logger.event("State", ("%s -> %s"):format(transition.previous, transition.state))
+        self.logger.event("State", ("%s -> PLATFORM (approach)"):format(tostring(previous)))
     end
 
     self:_handleStateChange()
-
-    if transition.event == "approach" then
-        self:_enqueue("approach")
-    elseif transition.event == "departure" then
-        self:_invalidateMetadata()
-        self:_enqueue("departure")
-    end
-
-    if transition.resetTo and self.logger then
-        self.logger.event("State", ("%s -> %s (automatic reset)"):format(
-            tostring(transition.state),
-            tostring(transition.resetTo)
-        ))
-    end
+    self:_enqueue("approach")
 end
 
--- function: Handle a PASSING bundled signal without advancing the stopping-train state machine.
+-- function: Handle a DEPARTURE pulse and explicitly return the track state to IDLE.
+function Scheduler:_handleDeparture()
+    local previous = self.trackState:get()
+    self.trackState:set("IDLE")
+
+    if self.logger then
+        self.logger.event("State", ("%s -> IDLE (departure)"):format(tostring(previous)))
+    end
+
+    self:_handleStateChange()
+    self:_invalidateMetadata()
+    self:_enqueue("departure")
+end
+
+-- function: Handle a PASSING pulse without changing the stopping-train state.
 function Scheduler:_handlePassing()
     if self.logger then
         self.logger.event("Passing", ("signal received (track=%s)"):format(tostring(self.config.trackNumber)))
@@ -155,7 +157,7 @@ end
 -- function: Handle the direct reset button and return the stopping-train state to IDLE.
 function Scheduler:_handleReset()
     local previous = self.trackState:get()
-    self.trackState:reset()
+    self.trackState:set("IDLE")
     self:_invalidateMetadata()
 
     local priority = self:_preemptPriority()
@@ -173,8 +175,10 @@ function Scheduler:monitorInput()
     while true do
         local event = self.input:waitForEvent()
 
-        if event == "next" then
-            self:_handleNext()
+        if event == "approach" then
+            self:_handleApproach()
+        elseif event == "departure" then
+            self:_handleDeparture()
         elseif event == "passing" then
             self:_handlePassing()
         elseif event == "reset" then
