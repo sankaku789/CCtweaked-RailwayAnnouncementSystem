@@ -49,7 +49,7 @@ return {
         checkIntervalSeconds = 1,
 
         stopped = {
-            enabled = false,
+            enabled = true,
             state = "PLATFORM",
             type = "stopped",
             initialDelayMs = 30000,
@@ -57,7 +57,7 @@ return {
         },
 
         nextTrain = {
-            enabled = false,
+            enabled = true,
             state = "IDLE",
             type = "next_train",
             initialDelayMs = 60000,

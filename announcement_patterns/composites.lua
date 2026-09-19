@@ -16,9 +16,9 @@ return {
     },
 
     next_train_info = {
-        "next_train_intro",
-        "track_ni",
         "next_train_prefix",
+        "track_ni",
+        "next_train_intro",
         "train_info",
     },
 }
