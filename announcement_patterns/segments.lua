@@ -1,6 +1,9 @@
 return {
     approach_melody = {
-        path = "audio/melody/approach.dfpwm",
+        resolver = "config_path",
+        directory = "audio/melody",
+        configPath = "announcement.melody.approachPath",
+        defaultPath = "approach.dfpwm",
         enabled = {
             path = "announcement.melody.approachEnabled",
             fallbackPath = "announcement.approach.melodyEnabled",
@@ -46,7 +49,10 @@ return {
     warning = "audio/approach/warning.dfpwm",
 
     arrival_melody = {
-        path = "audio/melody/arrival.dfpwm",
+        resolver = "config_path",
+        directory = "audio/melody",
+        configPath = "announcement.melody.arrivalPath",
+        defaultPath = "arrival.dfpwm",
         enabled = {
             path = "announcement.melody.arrivalEnabled",
             fallbackPath = "announcement.approach.arrivalMelodyEnabled",
@@ -55,7 +61,10 @@ return {
     },
 
     departure_melody = {
-        path = "audio/melody/departure.dfpwm",
+        resolver = "config_path",
+        directory = "audio/melody",
+        configPath = "announcement.melody.departurePath",
+        defaultPath = "departure.dfpwm",
         enabled = {
             path = "announcement.melody.departureEnabled",
             default = true,
