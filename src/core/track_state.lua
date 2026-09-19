@@ -1,18 +1,12 @@
 local TrackState = {}
 TrackState.__index = TrackState
 
-local transitions = {
-    IDLE = {
-        state = "PLATFORM",
-        event = "approach",
-    },
-    PLATFORM = {
-        state = "IDLE",
-        event = "departure",
-    },
+local states = {
+    IDLE = true,
+    PLATFORM = true,
 }
 
--- function: Create a track state machine starting from IDLE.
+-- function: Create a track state holder starting from IDLE.
 function TrackState.new(_options)
     return setmetatable({
         state = "IDLE",
@@ -24,23 +18,10 @@ function TrackState:get()
     return self.state
 end
 
--- function: Reset the track state to IDLE.
-function TrackState:reset()
-    self.state = "IDLE"
-end
-
--- function: Advance the track state by one transition.
-function TrackState:advance()
-    local previous = self.state
-    local transition = assert(transitions[previous], "unknown track state: " .. tostring(previous))
-
-    self.state = transition.state
-
-    return {
-        previous = previous,
-        state = self.state,
-        event = transition.event,
-    }
+-- function: Set the current track state explicitly.
+function TrackState:set(state)
+    assert(states[state], "unknown track state: " .. tostring(state))
+    self.state = state
 end
 
 return TrackState
