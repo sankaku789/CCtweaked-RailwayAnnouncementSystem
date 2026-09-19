@@ -4,9 +4,10 @@ return {
     input = {
         bundled = {
             side = "top",
+            syncDelaySeconds = 0.05,
             signals = {
-                next = colors.red,
-                passing = colors.blue,
+                approach = colors.red,
+                departure = colors.blue,
             },
         },
 
