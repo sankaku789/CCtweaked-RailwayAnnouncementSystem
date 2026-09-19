@@ -118,26 +118,24 @@ function Scheduler:_enqueue(typeName)
     return true
 end
 
--- function: Handle an APPROACH pulse and explicitly mark the track as occupied.
+-- function: Handle an APPROACH pulse and enable the PLATFORM periodic announcement mode.
 function Scheduler:_handleApproach()
-    local previous = self.trackState:get()
     self.trackState:set("PLATFORM")
 
     if self.logger then
-        self.logger.event("State", ("%s -> PLATFORM (approach)"):format(tostring(previous)))
+        self.logger.event("State", "PLATFORM (approach)")
     end
 
     self:_handleStateChange()
     self:_enqueue("approach")
 end
 
--- function: Handle a DEPARTURE pulse and explicitly return the track state to IDLE.
+-- function: Handle a DEPARTURE pulse and enable the IDLE periodic announcement mode.
 function Scheduler:_handleDeparture()
-    local previous = self.trackState:get()
     self.trackState:set("IDLE")
 
     if self.logger then
-        self.logger.event("State", ("%s -> IDLE (departure)"):format(tostring(previous)))
+        self.logger.event("State", "IDLE (departure)")
     end
 
     self:_handleStateChange()
@@ -145,7 +143,7 @@ function Scheduler:_handleDeparture()
     self:_enqueue("departure")
 end
 
--- function: Handle a PASSING pulse without changing the stopping-train state.
+-- function: Handle a PASSING pulse without changing the periodic announcement mode.
 function Scheduler:_handlePassing()
     if self.logger then
         self.logger.event("Passing", ("signal received (track=%s)"):format(tostring(self.config.trackNumber)))
@@ -154,9 +152,8 @@ function Scheduler:_handlePassing()
     self:_enqueue("passing")
 end
 
--- function: Handle the direct reset button and return the stopping-train state to IDLE.
+-- function: Handle the direct reset button and enable the IDLE periodic announcement mode.
 function Scheduler:_handleReset()
-    local previous = self.trackState:get()
     self.trackState:set("IDLE")
     self:_invalidateMetadata()
 
@@ -166,7 +163,7 @@ function Scheduler:_handleReset()
     self:_handleStateChange()
 
     if self.logger then
-        self.logger.event("State", ("%s -> IDLE (manual reset)"):format(tostring(previous)))
+        self.logger.event("State", "IDLE (manual reset)")
     end
 end
 
