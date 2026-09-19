@@ -57,6 +57,15 @@ local function normalizeRelativePath(value)
     return table.concat(parts, "/")
 end
 
+-- function: Build the expected DFPWM path for one validated audio asset ID.
+local function pathFromId(directory, value)
+    if not validId(value) or type(directory) ~= "string" or directory == "" then
+        return nil
+    end
+
+    return fs.combine(directory, tostring(value) .. ".dfpwm")
+end
+
 -- function: Create a semantic announcement segment resolver.
 function Segment.new(config, definitions)
     return setmetatable({
@@ -75,12 +84,8 @@ end
 
 -- function: Resolve an audio asset ID to a DFPWM file inside a directory.
 function Segment:fromId(directory, value)
-    if not validId(value) or type(directory) ~= "string" or directory == "" then
-        return nil
-    end
-
-    local path = fs.combine(directory, tostring(value) .. ".dfpwm")
-    if self:exists(path) then
+    local path = pathFromId(directory, value)
+    if path and self:exists(path) then
         return path
     end
 
@@ -121,43 +126,52 @@ end
 -- function: Resolve a dynamic track segment from the announcement request.
 function Segment:_resolveTrack(definition, context)
     local request = context and context.request or nil
-    local path = self:fromId(definition.directory, request and request.track or nil)
+    local value = request and request.track or nil
+    local path = pathFromId(definition.directory, value)
 
-    if path then
+    if not path then
+        return nil, "track value is not available"
+    end
+
+    if self:exists(path) then
         return { path }
     end
 
-    return nil
+    return nil, "missing audio: " .. path
 end
 
 -- function: Resolve a train-class audio variant from train metadata.
 function Segment:_resolveClass(definition, context)
     local metadata = context and context.metadata or nil
-    if type(metadata) ~= "table" then
-        return nil
+    local value = type(metadata) == "table" and metadata.class or nil
+    local path = pathFromId(definition.directory, value)
+
+    if not path then
+        return nil, "train class metadata is not available"
     end
 
-    local path = self:fromId(definition.directory, metadata.class)
-    if path then
+    if self:exists(path) then
         return { path }
     end
 
-    return nil
+    return nil, "missing audio: " .. path
 end
 
 -- function: Resolve a destination-based audio variant from train metadata.
 function Segment:_resolveDestination(definition, context)
     local metadata = context and context.metadata or nil
-    if type(metadata) ~= "table" then
-        return nil
+    local value = type(metadata) == "table" and metadata.destination or nil
+    local path = pathFromId(definition.directory, value)
+
+    if not path then
+        return nil, "destination metadata is not available"
     end
 
-    local path = self:fromId(definition.directory, metadata.destination)
-    if path then
+    if self:exists(path) then
         return { path }
     end
 
-    return nil
+    return nil, "missing audio: " .. path
 end
 
 -- function: Resolve a configured relative DFPWM path inside a fixed audio directory.
@@ -182,7 +196,7 @@ function Segment:_resolveConfigPath(definition, requirePlayable)
 
     local path = fs.combine(definition.directory, relativePath)
     if requirePlayable and not self:exists(path) then
-        return nil
+        return nil, "missing audio: " .. path
     end
 
     return { path }
@@ -208,7 +222,7 @@ function Segment:resolve(id, context, requirePlayable)
     local definition = self.definitions[id]
     if type(definition) == "string" then
         if requirePlayable and not self:exists(definition) then
-            return nil
+            return nil, "missing audio: " .. definition
         end
 
         return { definition }
@@ -223,7 +237,7 @@ function Segment:resolve(id, context, requirePlayable)
     end
 
     if not self:_isEnabled(definition) then
-        return nil
+        return nil, "segment is disabled"
     end
 
     local hasPath = definition.path ~= nil
@@ -238,7 +252,7 @@ function Segment:resolve(id, context, requirePlayable)
         end
 
         if requirePlayable and not self:exists(definition.path) then
-            return nil
+            return nil, "missing audio: " .. definition.path
         end
 
         return { definition.path }
