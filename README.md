@@ -47,19 +47,27 @@ APPROACH=OFF  DEPARTURE=ON  -> 10 -> departure
 APPROACH=ON   DEPARTURE=ON  -> 11 -> passing
 ```
 
-`passing` 用センサはAPPROACH線とDEPARTURE線の両方へ接続します。2線の立ち上がりタイミング差を吸収するため、最初の信号検出後に `input.bundled.syncDelaySeconds` だけ待ってから2線をまとめて再読します。既定値は `0.05` 秒です。
+`passing` 用センサはAPPROACH線とDEPARTURE線の両方へ接続します。最初の非0入力を検出した後、`input.bundled.syncDelaySeconds` の同期窓の間に観測したAPPROACH/DEPARTURE bitをORで蓄積してイベント種別を確定します。既定値は `0.05` 秒です。これにより、2線の立ち上がりにわずかな時間差があっても `11` としてpassingを判定できます。
 
-同じパルスを複数回処理しないよう、一度非0コードを受け付けた後は `00` に戻るまで再武装しません。`00` 自体はTrackStateを変更しません。
+同じパルスを複数回処理しないよう、一度非0コードを受け付けた後は `00` に戻るまで再武装しません。
 
-停車列車の内部状態は2状態だけ保持し、パルス種別から明示的に設定します。
+TrackStateは即時イベントの種別判定には使わず、`stopped` / `next_train` の定期放送を選ぶためだけに使います。起動直後は `UNKNOWN` で、定期放送は実行しません。
 
 ```text
-approach  -> PLATFORM
+起動直後  -> UNKNOWN
+approach   -> PLATFORM
  departure -> IDLE
-passing   -> state変更なし
+passing    -> state変更なし
+reset      -> IDLE
 ```
 
-これによりapproachパルスを取りこぼしても、次のdepartureパルスをapproachとして誤認して以後の状態がずれ続けることはありません。
+```text
+UNKNOWN  -> periodicなし
+PLATFORM -> stopped
+IDLE     -> next_train
+```
+
+これによりapproachパルスを取りこぼしても、次のdepartureパルスをapproachとして誤認して以後の入力解釈がずれ続けることはありません。再起動直後も、状態が確定する前に `next_train` を流しません。
 
 旧設定から更新する場合は `input.bundled.signals.next` / `passing` を `approach` / `departure` に変更し、passingセンサを両信号線へ接続してください。
 
