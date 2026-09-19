@@ -155,12 +155,10 @@ function Composer:_resolveComposite(id, definition, context, resolving)
     return output
 end
 
--- function: Resolve a user-defined route slot for the current route and announcement type.
+-- function: Resolve a user-defined route slot for the current route.
 function Composer:_resolveRouteSlot(slotName, context, resolving)
-    local request = context and context.request or nil
     local metadata = context and context.metadata or nil
-
-    if type(request) ~= "table" or type(metadata) ~= "table" then
+    if type(metadata) ~= "table" then
         return {}
     end
 
@@ -174,12 +172,7 @@ function Composer:_resolveRouteSlot(slotName, context, resolving)
         return {}
     end
 
-    local typeDefinition = routeDefinition[request.type]
-    if type(typeDefinition) ~= "table" then
-        return {}
-    end
-
-    local definition = typeDefinition[slotName]
+    local definition = routeDefinition[slotName]
     if definition == nil then
         return {}
     end
