@@ -157,7 +157,7 @@ approach = {
     "approach_train_arrival|train",
     "warning",
     "?arrival_melody",
-    "?route_options",
+    "route:sample",
 }
 ```
 
@@ -342,19 +342,35 @@ ffmpeg -i input.wav -ac 1 -ar 48000 -c:a dfpwm output.dfpwm
 
 ## Route別オプション放送
 
-`announcement_patterns/route_options.lua` にRoute IDと追加symbol IDを設定します。
+`main.lua` または `composites.lua` に `route:<slot>` を置くと、その位置にRoute別のDSL断片を挿入できます。slot名は任意です。標準パターンでは `route:sample` を用意しています。
+
+```lua
+approach = {
+    "?approach_melody",
+    "soon",
+    "?track_ni",
+    "approach_train_arrival|train",
+    "warning",
+    "?arrival_melody",
+    "route:sample",
+}
+```
+
+`announcement_patterns/route_options.lua` ではRoute ID、放送種別、slot名の順に内容を定義します。
 
 ```lua
 return {
     ["1234567890123456789"] = {
         approach = {
-            "airport_access",
+            sample = {
+                "airport_access",
+            },
         },
     },
 }
 ```
 
-追加symbolには `segments.lua` のsegmentまたは `composites.lua` のcompositeを指定できます。
+slotが未定義の場合は何も挿入しません。slot内では通常のDSL entryと同じく `?`、`|`、compositeを利用できます。
 
 ## 優先度 / 割り込み
 

@@ -6,6 +6,17 @@ local function trim(value)
     return value:match("^%s*(.-)%s*$")
 end
 
+-- function: Parse a route-slot symbol and return its user-defined slot name.
+local function routeSlotName(id)
+    if type(id) ~= "string" or id:sub(1, 6) ~= "route:" then
+        return nil
+    end
+
+    local name = trim(id:sub(7))
+    assert(name ~= "", "route slot name cannot be empty")
+    return name
+end
+
 -- function: Check whether a composed playback item is a pause directive.
 local function isPause(item)
     return type(item) == "table" and item.kind == "pause"
@@ -144,66 +155,71 @@ function Composer:_resolveComposite(id, definition, context, resolving)
     return output
 end
 
--- function: Resolve route-specific optional symbols for the current announcement type.
-function Composer:_resolveRouteOptions(context, resolving)
+-- function: Resolve a user-defined route slot for the current route and announcement type.
+function Composer:_resolveRouteSlot(slotName, context, resolving)
     local request = context and context.request or nil
     local metadata = context and context.metadata or nil
 
     if type(request) ~= "table" or type(metadata) ~= "table" then
-        return nil
+        return {}
     end
 
     local routeId = metadata.routeId
     if type(routeId) ~= "string" or routeId == "" then
-        return nil
+        return {}
     end
 
     local routeDefinition = self.routeOptions[routeId]
     if type(routeDefinition) ~= "table" then
-        return nil
+        return {}
     end
 
-    local symbolIds = routeDefinition[request.type]
-    if type(symbolIds) ~= "table" then
-        return nil
+    local typeDefinition = routeDefinition[request.type]
+    if type(typeDefinition) ~= "table" then
+        return {}
     end
 
-    if resolving.route_options then
-        error("recursive announcement composite: route_options")
+    local definition = typeDefinition[slotName]
+    if definition == nil then
+        return {}
     end
 
-    resolving.route_options = true
+    if type(definition) ~= "table" then
+        error("route slot must be a table: " .. tostring(slotName))
+    end
+
+    local resolvingKey = "route:" .. slotName
+    if resolving[resolvingKey] then
+        error("recursive route slot: " .. tostring(slotName))
+    end
+
+    resolving[resolvingKey] = true
 
     local output = {}
-    for _, symbolId in ipairs(symbolIds) do
-        if type(symbolId) ~= "string" or symbolId == "" then
-            error("route option symbol ID must be a non-empty string")
+    for _, entry in ipairs(definition) do
+        local items, parsed = self:_resolveEntry(entry, context, true, resolving)
+        if items then
+            appendAll(output, items)
+        elseif not parsed.optional then
+            resolving[resolvingKey] = nil
+            return {}
         end
-
-        if symbolId == "route_options" then
-            error("route_options cannot include itself")
-        end
-
-        appendAll(output, self:_resolveSymbol(symbolId, context, true, resolving))
     end
 
-    resolving.route_options = nil
-    if #output == 0 then
-        return nil
-    end
-
+    resolving[resolvingKey] = nil
     return output
 end
 
--- function: Resolve one composite, route-options, or segment symbol into playback items.
+-- function: Resolve one composite, route-slot, or segment symbol into playback items.
 function Composer:_resolveSymbol(id, context, requirePlayable, resolving)
+    local slotName = routeSlotName(id)
+    if slotName then
+        return self:_resolveRouteSlot(slotName, context, resolving)
+    end
+
     local composite = self.composites[id]
     if composite ~= nil then
         return self:_resolveComposite(id, composite, context, resolving)
-    end
-
-    if id == "route_options" then
-        return self:_resolveRouteOptions(context, resolving)
     end
 
     return self.resolver:resolve(id, context, requirePlayable)

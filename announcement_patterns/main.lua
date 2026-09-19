@@ -6,7 +6,7 @@ return {
         "approach_train_arrival|train",
         "warning",
         "?arrival_melody",
-        "?route_options",
+        "route:sample",
     },
 
     approach_out_of_service = {
@@ -16,7 +16,7 @@ return {
         "out_of_service_train",
         "warning",
         "?arrival_melody",
-        "?route_options",
+        "route:sample",
     },
 
     passing = {
