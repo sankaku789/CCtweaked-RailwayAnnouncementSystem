@@ -28,20 +28,40 @@ wget run https://raw.githubusercontent.com/sankaku789/CCtweaked-RailwayAnnouncem
 
 ```text
 Bundled Cable (top)
-├─ red  : NEXT
-└─ blue : PASSING
+├─ red  : APPROACH pulse
+└─ blue : DEPARTURE pulse
+
+PASSING sensor
+└─ red + blue を同時にpulse
 
 Normal Redstone (back)
 └─ RESET
 ```
 
-停車列車は2状態です。
+2本のbundled signalは状態値ではなく、放送種別を表すパルスコードとして読みます。
 
 ```text
-IDLE --approach--> PLATFORM --departure--> IDLE
+APPROACH=OFF  DEPARTURE=OFF -> 00 -> idle / re-arm
+APPROACH=ON   DEPARTURE=OFF -> 01 -> approach
+APPROACH=OFF  DEPARTURE=ON  -> 10 -> departure
+APPROACH=ON   DEPARTURE=ON  -> 11 -> passing
 ```
 
-`PASSING` は状態を変えません。
+`passing` 用センサはAPPROACH線とDEPARTURE線の両方へ接続します。2線の立ち上がりタイミング差を吸収するため、最初の信号検出後に `input.bundled.syncDelaySeconds` だけ待ってから2線をまとめて再読します。既定値は `0.05` 秒です。
+
+同じパルスを複数回処理しないよう、一度非0コードを受け付けた後は `00` に戻るまで再武装しません。`00` 自体はTrackStateを変更しません。
+
+停車列車の内部状態は2状態だけ保持し、パルス種別から明示的に設定します。
+
+```text
+approach  -> PLATFORM
+ departure -> IDLE
+passing   -> state変更なし
+```
+
+これによりapproachパルスを取りこぼしても、次のdepartureパルスをapproachとして誤認して以後の状態がずれ続けることはありません。
+
+旧設定から更新する場合は `input.bundled.signals.next` / `passing` を `approach` / `departure` に変更し、passingセンサを両信号線へ接続してください。
 
 ## MTR / TSC metadata
 
