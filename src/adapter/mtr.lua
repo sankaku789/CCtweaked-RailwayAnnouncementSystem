@@ -111,6 +111,21 @@ local function normalizeBaseUrl(value)
     return value
 end
 
+-- function: Count serialized MTR car details from one arrival response.
+local function carCountFromArrival(arrival)
+    local cars = type(arrival) == "table" and arrival.cars or nil
+    if type(cars) ~= "table" then
+        return nil
+    end
+
+    local count = #cars
+    if count <= 0 then
+        return nil
+    end
+
+    return count
+end
+
 -- function: Read and close a CC:Tweaked HTTP response handle.
 local function readResponse(response)
     local body = response.readAll()
@@ -124,8 +139,8 @@ local function preserveRouteIds(raw)
         return raw
     end
 
-    return raw:gsub('("routeId"%s*:%s*)(%-?%d+)', function(prefix, routeId)
-        return prefix .. '"' .. routeId .. '"'
+    return raw:gsub('(\"routeId\"%s*:%s*)(%-?%d+)', function(prefix, routeId)
+        return prefix .. '\"' .. routeId .. '\"'
     end)
 end
 
@@ -289,7 +304,7 @@ function MtrAdapter:_requestArrival()
     return nil
 end
 
--- function: Return normalized train metadata, route ID, and terminating status for the next MTR arrival.
+-- function: Return normalized train metadata, car count, route ID, and terminating status for the next MTR arrival.
 function MtrAdapter:getMetadata(_context)
     local arrival = self:_requestArrival()
     if not arrival then
@@ -298,6 +313,7 @@ function MtrAdapter:getMetadata(_context)
 
     local classId = normalizeAssetId(arrival.routeNumber)
     local destinationId = normalizeAssetId(arrival.destination)
+    local carCount = carCountFromArrival(arrival)
     local terminating = arrival.isTerminating == true
     local routeId = type(arrival.routeId) == "string" and trim(arrival.routeId) or nil
 
@@ -305,13 +321,14 @@ function MtrAdapter:getMetadata(_context)
         routeId = nil
     end
 
-    if not classId and not destinationId and not terminating and not routeId then
+    if not classId and not destinationId and not carCount and not terminating and not routeId then
         return nil
     end
 
     return {
         class = classId,
         destination = destinationId,
+        carCount = carCount,
         terminating = terminating,
         routeId = routeId,
     }
