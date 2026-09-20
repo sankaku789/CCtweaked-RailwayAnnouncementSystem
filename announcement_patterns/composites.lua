@@ -1,12 +1,19 @@
 return {
+    car_count_info = {
+        "car_count_prefix",
+        "car_count",
+    },
+
     approach_train_arrival = {
         "train_class",
         "approach_destination",
+        "?car_count_info",
     },
 
     train_info = {
         "train_class",
         "destination_sentence",
+        "?car_count_info",
     },
 
     stopped_train_info = {
