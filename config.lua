@@ -24,6 +24,45 @@ return {
         },
     },
 
+    speaker = {
+        volume = 3,
+        reconnectDelay = 1,
+    },
+
+    adapter = {
+        module = "mtr",
+        cacheTtlMs = 30000,
+
+        mtr = {
+            baseUrl = "http://127.0.0.1:8888",
+            dimension = 0,
+
+            -- Preferred: exact station/platform name matching through the TSC HTTP API.
+            stationName = "",
+            platformName = "",
+
+            -- Optional direct override. When set, stationName/platformName are ignored.
+            platformIdHex = "",
+        },
+    },
+
+    announcement = {
+        melody = {
+            -- Paths are relative to audio/melody and may include subdirectories.
+            approachPath = "approach.dfpwm",
+            arrivalPath = "arrival.dfpwm",
+            departurePath = "departure.dfpwm",
+
+            approachEnabled = true,
+            arrivalEnabled = false,
+            departureEnabled = true,
+        },
+
+        departure = {
+            doorsClosingEnabled = false,
+        },
+    },
+
     queue = {
         -- Requests at or above this priority interrupt lower-priority playback.
         preemptPriority = 100,
@@ -63,44 +102,5 @@ return {
             initialDelayMs = 60000,
             intervalMs = 60000,
         },
-    },
-
-    speaker = {
-        volume = 3,
-        reconnectDelay = 1,
-    },
-
-    adapter = {
-        module = "mtr",
-        cacheTtlMs = 30000,
-
-        mtr = {
-            baseUrl = "http://127.0.0.1:8888",
-            dimension = 0,
-
-            -- Preferred: exact station/platform name matching through the TSC HTTP API.
-            stationName = "",
-            platformName = "",
-
-            -- Optional direct override. When set, stationName/platformName are ignored.
-            platformIdHex = "",
-        },
-    },
-
-    announcement = {
-        melody = {
-            -- Paths are relative to audio/melody and may include subdirectories.
-            approachPath = "approach.dfpwm",
-            arrivalPath = "arrival.dfpwm",
-            departurePath = "departure.dfpwm",
-
-            approachEnabled = true,
-            arrivalEnabled = false,
-            departureEnabled = true,
-        },
-
-        departure = {
-            doorsClosingEnabled = false,
-        },
-    },
+    }
 }
