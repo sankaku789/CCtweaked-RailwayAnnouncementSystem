@@ -65,14 +65,14 @@ return {
 
     queue = {
         -- Requests at or above this priority interrupt lower-priority playback.
-        preemptPriority = 100,
+        preemptPriority = 2,
 
         priorities = {
-            approach = 100,
-            passing = 100,
-            departure = 100,
-            stopped = 20,
-            next_train = 10,
+            approach = 2,
+            passing = 2,
+            departure = 3,
+            stopped = 1,
+            next_train = 0,
         },
 
         ttlMs = {
