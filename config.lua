@@ -37,11 +37,10 @@ return {
             baseUrl = "http://127.0.0.1:8888",
             dimension = 0,
 
-            -- Preferred: exact station/platform name matching through the TSC HTTP API.
+            -- trackNumber is matched against the platform name at this station.
             stationName = "",
-            platformName = "",
 
-            -- Optional direct override. When set, stationName/platformName are ignored.
+            -- Optional direct override. When set, stationName/trackNumber are ignored.
             platformIdHex = "",
         },
     },
