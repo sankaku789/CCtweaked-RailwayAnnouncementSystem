@@ -86,4 +86,5 @@ return {
     stopped_notice = "audio/stopped/train.dfpwm",
     next_train_intro = "audio/next_train/train.dfpwm",
     next_train_prefix = "audio/next_train/prefix.dfpwm",
+    next_train_melody = "audio/melody/next.dfpwm"
 }

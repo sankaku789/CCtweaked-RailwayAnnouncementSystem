@@ -37,6 +37,7 @@ return {
     },
 
     next_train = {
+        "?next_train_melody",
         "?next_train_info",
     },
 }
