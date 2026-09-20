@@ -39,10 +39,11 @@ function Provider:get(context)
         self.cache:set(key, metadata)
 
         if self.logger and type(self.logger.event) == "function" then
-            self.logger.event("Metadata", ("routeId=%s class=%s destination=%s"):format(
+            self.logger.event("Metadata", ("routeId=%s class=%s destination=%s cars=%s"):format(
                 tostring(metadata.routeId or "-"),
                 tostring(metadata.class or "-"),
-                tostring(metadata.destination or "-")
+                tostring(metadata.destination or "-"),
+                tostring(metadata.carCount or "-")
             ))
         end
     end
