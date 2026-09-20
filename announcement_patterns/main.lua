@@ -5,6 +5,7 @@ return {
         "?track_ni",
         "approach_train_arrival|train",
         "warning",
+        "?car_count_info",
         "?arrival_melody",
         "route:sample",
     },
