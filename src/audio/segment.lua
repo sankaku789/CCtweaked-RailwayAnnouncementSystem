@@ -174,6 +174,23 @@ function Segment:_resolveDestination(definition, context)
     return nil, "missing audio: " .. path
 end
 
+-- function: Resolve a car-count audio variant from train metadata.
+function Segment:_resolveCarCount(definition, context)
+    local metadata = context and context.metadata or nil
+    local value = type(metadata) == "table" and tonumber(metadata.carCount) or nil
+
+    if not value or value < 1 or value ~= math.floor(value) then
+        return nil, "car count metadata is not available"
+    end
+
+    local path = pathFromId(definition.directory, math.floor(value))
+    if self:exists(path) then
+        return { path }
+    end
+
+    return nil, "missing audio: " .. tostring(path)
+end
+
 -- function: Resolve a configured relative DFPWM path inside a fixed audio directory.
 function Segment:_resolveConfigPath(definition, requirePlayable)
     if type(definition.directory) ~= "string" or definition.directory == "" then
@@ -210,6 +227,8 @@ function Segment:_resolveDynamic(definition, context, requirePlayable)
         return self:_resolveClass(definition, context)
     elseif definition.resolver == "destination" then
         return self:_resolveDestination(definition, context)
+    elseif definition.resolver == "car_count" then
+        return self:_resolveCarCount(definition, context)
     elseif definition.resolver == "config_path" then
         return self:_resolveConfigPath(definition, requirePlayable)
     end
