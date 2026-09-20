@@ -7,7 +7,6 @@ return {
     approach_train_arrival = {
         "train_class",
         "approach_destination",
-        "?car_count_info",
     },
 
     train_info = {
