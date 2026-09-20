@@ -111,6 +111,21 @@ local function normalizeBaseUrl(value)
     return value
 end
 
+-- function: Read the MTR platform name from the announcement track context.
+local function platformNameFromContext(context)
+    local track = type(context) == "table" and context.track or nil
+    if type(track) ~= "string" and type(track) ~= "number" then
+        error("MTR adapter track context is not configured")
+    end
+
+    local platformName = trim(tostring(track))
+    if platformName == "" then
+        error("MTR adapter track context is not configured")
+    end
+
+    return platformName
+end
+
 -- function: Count serialized MTR car details from one arrival response.
 local function carCountFromArrival(arrival)
     local cars = type(arrival) == "table" and arrival.cars or nil
@@ -154,7 +169,6 @@ function MtrAdapter.new(options)
         dimension = tonumber(cfg.dimension) or 0,
         platformIdHex = type(cfg.platformIdHex) == "string" and trim(cfg.platformIdHex) or "",
         stationName = type(cfg.stationName) == "string" and trim(cfg.stationName) or "",
-        platformName = type(cfg.platformName) == "string" and trim(cfg.platformName) or "",
         stationIdHex = nil,
     }, MtrAdapter)
 end
@@ -260,30 +274,27 @@ function MtrAdapter:_resolveStationIdHex()
     return matchedId
 end
 
--- function: Build an arrivals request for a direct platform ID or configured station name.
-function MtrAdapter:_buildArrivalsRequest()
+-- function: Build an arrivals request for a direct platform ID or the announcement track context.
+function MtrAdapter:_buildArrivalsRequest(context)
     if self.platformIdHex ~= "" then
         return {
             platformIdsHex = { self.platformIdHex },
             maxCountPerPlatform = 1,
             maxCountTotal = 1,
-        }, true
+        }, true, nil
     end
 
-    if self.platformName == "" then
-        error("MTR adapter platformName is not configured")
-    end
-
+    local platformName = platformNameFromContext(context)
     return {
         stationIdsHex = { self:_resolveStationIdHex() },
         maxCountPerPlatform = 1,
         maxCountTotal = 0,
-    }, false
+    }, false, platformName
 end
 
--- function: Request the next arrival for the configured MTR platform.
-function MtrAdapter:_requestArrival()
-    local requestBody, directPlatform = self:_buildArrivalsRequest()
+-- function: Request the next arrival for the platform identified by the announcement track context.
+function MtrAdapter:_requestArrival(context)
+    local requestBody, directPlatform, platformName = self:_buildArrivalsRequest(context)
     local data = self:_requestMap("arrivals", requestBody, true)
     local arrivals = type(data) == "table" and data.arrivals or nil
 
@@ -296,7 +307,7 @@ function MtrAdapter:_requestArrival()
     end
 
     for _, arrival in ipairs(arrivals) do
-        if type(arrival) == "table" and nameMatches(arrival.platformName, self.platformName) then
+        if type(arrival) == "table" and nameMatches(arrival.platformName, platformName) then
             return arrival
         end
     end
@@ -305,8 +316,8 @@ function MtrAdapter:_requestArrival()
 end
 
 -- function: Return normalized train metadata, car count, route ID, and terminating status for the next MTR arrival.
-function MtrAdapter:getMetadata(_context)
-    local arrival = self:_requestArrival()
+function MtrAdapter:getMetadata(context)
+    local arrival = self:_requestArrival(context)
     if not arrival then
         return nil
     end
