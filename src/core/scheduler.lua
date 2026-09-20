@@ -245,6 +245,14 @@ end
 function Scheduler:processQueue()
     while true do
         local request = self.queue:waitPop()
+
+        if request.type == "departure" then
+            local delaySeconds = tonumber(self.config.TIMEOUT_TIMING) or 0
+            if delaySeconds > 0 then
+                sleep(delaySeconds)
+            end
+        end
+
         local metadata = self:_metadataFor(request)
         local segments, diagnostics = self.composer:compose(request, metadata)
 

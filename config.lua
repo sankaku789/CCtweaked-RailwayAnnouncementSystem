@@ -1,5 +1,6 @@
 return {
     trackNumber = 1,
+    TIMEOUT_TIMING = 0,
 
     runtime = {
         -- Restart after unexpected application failures, but stop repeated crash loops.
