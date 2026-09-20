@@ -43,6 +43,13 @@ return {
         directory = "audio/station",
     },
 
+    car_count_prefix = "audio/cars/prefix.dfpwm",
+
+    car_count = {
+        resolver = "car_count",
+        directory = "audio/cars",
+    },
+
     train = "audio/approach/train.dfpwm",
     out_of_service_train = "audio/approach/out_of_service_train.dfpwm",
     passing_train = "audio/approach/passing_train.dfpwm",
