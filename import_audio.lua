@@ -1,6 +1,7 @@
 local BLOCK_SIZE = 512
 local COPY_CHUNK_SIZE = 16 * 1024
 local AUDIO_ROOT = "/audio"
+local DEPARTURE_MELODY_PATH = "/audio/melody/departure.dfpwm"
 
 -- function: Remove trailing NUL bytes and spaces from one TAR header field.
 local function cleanField(value)
@@ -207,6 +208,21 @@ local function copyEntryData(input, output, size)
     end
 end
 
+-- function: Stream a transferred file into an open destination handle until end of file.
+local function copyTransferredData(input, output)
+    local total = 0
+
+    while true do
+        local chunk = input.read(COPY_CHUNK_SIZE)
+        if not chunk or #chunk == 0 then
+            return total
+        end
+
+        output.write(chunk)
+        total = total + #chunk
+    end
+end
+
 -- function: Copy one regular TAR entry into a temporary file and atomically replace the destination.
 local function writeEntryFile(input, target, size)
     ensureParent(target)
@@ -240,6 +256,42 @@ local function writeEntryFile(input, target, size)
     end
 
     fs.move(temporary, target)
+end
+
+-- function: Copy one transferred file into a temporary file and atomically replace the destination.
+local function writeTransferredFile(input, target)
+    ensureParent(target)
+
+    local temporary = target .. ".import"
+    if fs.exists(temporary) then
+        fs.delete(temporary)
+    end
+
+    local output = fs.open(temporary, "wb")
+    if not output then
+        error("Could not open temporary audio file: " .. temporary, 0)
+    end
+
+    local ok, result = pcall(copyTransferredData, input, output)
+    output.close()
+
+    if not ok then
+        if fs.exists(temporary) then
+            fs.delete(temporary)
+        end
+        error(result, 0)
+    end
+
+    if fs.exists(target) then
+        if fs.isDir(target) then
+            fs.delete(temporary)
+            error("Expected audio file but found directory: " .. target, 0)
+        end
+        fs.delete(target)
+    end
+
+    fs.move(temporary, target)
+    return result
 end
 
 -- function: Extract supported DFPWM files from a TAR stream into the local audio directory.
@@ -300,45 +352,77 @@ local function extractTar(handle)
     return importedFiles, importedBytes, skippedEntries
 end
 
--- function: Close every transferred file except the selected TAR archive.
-local function selectTarFile(transferredFiles)
+-- function: Import one transferred DFPWM file as the default departure melody.
+local function importDepartureMelody(handle)
+    local importedBytes = writeTransferredFile(handle, DEPARTURE_MELODY_PATH)
+    return importedBytes
+end
+
+-- function: Close every transferred file except the first supported import file.
+local function selectImportFile(transferredFiles)
     local selected
+    local selectedKind
 
     for _, file in ipairs(transferredFiles.getFiles()) do
         local name = tostring(file.getName())
-        if not selected and name:lower():sub(-4) == ".tar" then
+        local lowerName = name:lower()
+
+        if not selected and lowerName:sub(-4) == ".tar" then
             selected = file
-            print("Importing -> " .. name)
+            selectedKind = "tar"
+            print("Importing TAR -> " .. name)
+        elseif not selected and lowerName:sub(-6) == ".dfpwm" then
+            selected = file
+            selectedKind = "departure_melody"
+            print("Importing departure melody -> " .. name)
         else
             print("Ignore transfer -> " .. name)
             file.close()
         end
     end
 
-    return selected
+    return selected, selectedKind
 end
 
--- function: Wait until the user drag-and-drops a TAR archive onto this computer.
-local function waitForTarFile()
+-- function: Wait until the user drag-and-drops a supported audio import file onto this computer.
+local function waitForImportFile()
     while true do
-        print("Drag and drop audio_pack.tar onto this computer.")
+        print("Drag and drop audio_pack.tar or a departure melody .dfpwm onto this computer.")
         local _, transferredFiles = os.pullEvent("file_transfer")
-        local file = selectTarFile(transferredFiles)
+        local file, kind = selectImportFile(transferredFiles)
 
         if file then
-            return file
+            return file, kind
         end
 
-        printError("No .tar file was included in the transfer.")
+        printError("No .tar or .dfpwm file was included in the transfer.")
     end
 end
 
--- function: Import one drag-and-dropped audio TAR archive into the local audio directory.
+-- function: Import one drag-and-dropped audio file into the local audio directory.
 local function main()
     print("Railway Announcement Audio Importer")
     print("TAR root must match the contents of /audio (approach/, class/, destination/, ...).")
+    print("A single .dfpwm file is installed as /audio/melody/departure.dfpwm.")
 
-    local file = waitForTarFile()
+    local file, kind = waitForImportFile()
+
+    if kind == "departure_melody" then
+        local ok, importedBytes = pcall(importDepartureMelody, file)
+        file.close()
+
+        if not ok then
+            printError("Departure melody import failed: " .. tostring(importedBytes))
+            return
+        end
+
+        print(("Departure melody installed: %s (%d byte(s))."):format(
+            DEPARTURE_MELODY_PATH,
+            importedBytes
+        ))
+        return
+    end
+
     local ok, importedFiles, importedBytes, skippedEntries = pcall(extractTar, file)
     file.close()
 
