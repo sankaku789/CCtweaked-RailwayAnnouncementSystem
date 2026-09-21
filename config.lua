@@ -1,6 +1,5 @@
 return {
     trackNumber = 1,
-    TIMEOUT_TIMING = 0,
 
     runtime = {
         -- Restart after unexpected application failures, but stop repeated crash loops.
@@ -60,6 +59,8 @@ return {
 
         departure = {
             doorsClosingEnabled = false,
+            -- Seconds to leave between the end of the melody and scheduled departure.
+            melodyEndLeadSeconds = 3,
         },
     },
 
