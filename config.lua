@@ -1,6 +1,9 @@
 return {
     trackNumber = 1,
 
+    -- Used only when automatic departure timing calculation fails.
+    TIMEOUT_TIMING = 0,
+
     runtime = {
         -- Restart after unexpected application failures, but stop repeated crash loops.
         restartDelaySeconds = 5,

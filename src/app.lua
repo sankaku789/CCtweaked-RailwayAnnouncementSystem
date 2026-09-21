@@ -59,7 +59,8 @@ end
 
 -- function: Calculate the internal departure delay from MTR dwell time and melody duration.
 local function configureDepartureTiming(adapter, resolver)
-    config.TIMEOUT_TIMING = 0
+    local fallbackDelaySeconds = tonumber(config.TIMEOUT_TIMING) or 0
+    config.TIMEOUT_TIMING = math.max(0, fallbackDelaySeconds)
 
     if not adapter or type(adapter.getPlatformDwellTimeMs) ~= "function" then
         return
