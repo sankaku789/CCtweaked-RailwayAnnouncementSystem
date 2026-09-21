@@ -274,6 +274,66 @@ function MtrAdapter:_resolveStationIdHex()
     return matchedId
 end
 
+-- function: Return the dwell time in milliseconds for the configured platform.
+function MtrAdapter:getPlatformDwellTimeMs(context)
+    if self.platformIdHex ~= "" then
+        local arrival = self:_requestArrival(context)
+        if not arrival then
+            error("MTR platform dwell time is unavailable for the direct platform ID")
+        end
+
+        local arrivalTime = tonumber(arrival.arrival)
+        local departureTime = tonumber(arrival.departure)
+        if not arrivalTime or not departureTime or departureTime < arrivalTime then
+            error("MTR arrival response does not contain a valid dwell interval")
+        end
+
+        return departureTime - arrivalTime
+    end
+
+    local stationIdHex = self:_resolveStationIdHex()
+    local platformName = platformNameFromContext(context)
+    local data = self:_requestMap("stations-and-routes", nil, false)
+    local routes = type(data) == "table" and data.routes or nil
+    if type(routes) ~= "table" then
+        error("MTR stations-and-routes response does not contain routes")
+    end
+
+    local dwellTime = nil
+
+    for _, route in ipairs(routes) do
+        local stations = type(route) == "table" and route.stations or nil
+        if type(stations) == "table" then
+            for _, station in ipairs(stations) do
+                local stationId = type(station) == "table" and station.id or nil
+                local candidate = type(station) == "table" and tonumber(station.dwellTime) or nil
+
+                if type(stationId) == "string"
+                    and trim(stationId) == stationIdHex
+                    and nameMatches(station.name, platformName)
+                    and candidate
+                    and candidate >= 0
+                then
+                    if dwellTime ~= nil and candidate ~= dwellTime then
+                        error("MTR platform dwell time differs between routes for platform: " .. platformName)
+                    end
+
+                    dwellTime = candidate
+                end
+            end
+        end
+    end
+
+    if dwellTime == nil then
+        error(("MTR platform dwell time was not found: station=%s platform=%s"):format(
+            self.stationName,
+            platformName
+        ))
+    end
+
+    return dwellTime
+end
+
 -- function: Build an arrivals request for a direct platform ID or the announcement track context.
 function MtrAdapter:_buildArrivalsRequest(context)
     if self.platformIdHex ~= "" then
