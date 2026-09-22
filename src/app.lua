@@ -58,19 +58,42 @@ local function departureMelodyDurationSeconds(resolver)
     return fs.getSize(path) / DFPWM_BYTES_PER_SECOND, path, nil
 end
 
--- function: Calculate the internal departure delay and return the MTR dwell time.
-local function configureDepartureTiming(adapter, resolver)
+-- function: Read the MTR dwell time for this platform.
+local function platformDwellTimeMs(adapter)
+    if not adapter or type(adapter.getPlatformDwellTimeMs) ~= "function" then
+        return nil
+    end
+
+    local ok, dwellTimeMs = pcall(adapter.getPlatformDwellTimeMs, adapter, {
+        track = config.trackNumber,
+    })
+    if not ok then
+        log.warn("MTR dwell time unavailable: " .. tostring(dwellTimeMs))
+        return nil
+    end
+
+    dwellTimeMs = tonumber(dwellTimeMs)
+    if not dwellTimeMs or dwellTimeMs < 0 then
+        log.warn("MTR dwell time unavailable: invalid dwell time")
+        return nil
+    end
+
+    return dwellTimeMs
+end
+
+-- function: Calculate the internal departure delay from a known MTR dwell time.
+local function configureDepartureTiming(dwellTimeMs, resolver)
     local fallbackDelaySeconds = tonumber(config.TIMEOUT_TIMING) or 0
     config.TIMEOUT_TIMING = math.max(0, fallbackDelaySeconds)
 
-    if not adapter or type(adapter.getPlatformDwellTimeMs) ~= "function" then
-        return nil
+    if dwellTimeMs == nil then
+        return
     end
 
     local melodySeconds, melodyPath, melodyError = departureMelodyDurationSeconds(resolver)
     if not melodySeconds then
         log.warn("Departure timing calculation skipped: " .. tostring(melodyError))
-        return nil
+        return
     end
 
     local departureConfig = type(config.announcement) == "table" and config.announcement.departure or nil
@@ -79,20 +102,6 @@ local function configureDepartureTiming(adapter, resolver)
         leadSeconds = DEFAULT_DEPARTURE_MELODY_END_LEAD_SECONDS
     end
     leadSeconds = math.max(0, leadSeconds)
-
-    local ok, dwellTimeMs = pcall(adapter.getPlatformDwellTimeMs, adapter, {
-        track = config.trackNumber,
-    })
-    if not ok then
-        log.warn("Departure timing calculation skipped: " .. tostring(dwellTimeMs))
-        return nil
-    end
-
-    dwellTimeMs = tonumber(dwellTimeMs)
-    if not dwellTimeMs or dwellTimeMs < 0 then
-        log.warn("Departure timing calculation skipped: invalid MTR dwell time")
-        return nil
-    end
 
     local dwellSeconds = dwellTimeMs / 1000
     local delaySeconds = math.max(0, dwellSeconds - melodySeconds - leadSeconds)
@@ -106,8 +115,6 @@ local function configureDepartureTiming(adapter, resolver)
         delaySeconds,
         melodyPath
     ))
-
-    return dwellTimeMs
 end
 
 -- function: Start and run the railway announcement application.
@@ -124,7 +131,8 @@ function app.run()
     local guidanceBell = GuidanceBell.new(config.guidanceBell, log)
 
     local adapter = loadAdapter()
-    local departureDwellTimeMs = configureDepartureTiming(adapter, resolver)
+    local departureDwellTimeMs = platformDwellTimeMs(adapter)
+    configureDepartureTiming(departureDwellTimeMs, resolver)
 
     local cache = Cache.new(config.adapter.cacheTtlMs)
     local metadataProvider = MetadataProvider.new(adapter, cache, log)
