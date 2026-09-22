@@ -5,14 +5,7 @@ Player.__index = Player
 
 local DFPWM_READ_SIZE = 4 * 1024
 local PCM_CHUNK_SIZE = 128 * 1024
-local PCM_SAMPLES_PER_SECOND = 48000
-local PLAYBACK_FINISH_MARGIN_SECONDS = 0.05
 local INTERRUPT_EVENT = "railway_player_interrupt"
-
--- function: Return the current UTC epoch time in milliseconds.
-local function now()
-    return os.epoch("utc")
-end
 
 -- function: Check whether a playback item is an explicit pause directive.
 local function isPause(item)
@@ -50,56 +43,6 @@ function Player:_validFile(path)
         and not fs.isDir(path)
 end
 
--- function: Extend the estimated audible playback deadline after one accepted PCM chunk.
-function Player:_extendPlaybackDeadline(deadlineMs, sampleCount)
-    local acceptedAt = now()
-    local baseMs = deadlineMs
-
-    if baseMs == nil or baseMs < acceptedAt then
-        baseMs = acceptedAt
-    end
-
-    local durationMs = (math.max(0, tonumber(sampleCount) or 0) / PCM_SAMPLES_PER_SECOND) * 1000
-    return baseMs + durationMs
-end
-
--- function: Wait until submitted PCM should have finished audibly while remaining interruptible.
-function Player:_waitUntilPlaybackDeadline(deadlineMs)
-    if deadlineMs == nil then
-        return true
-    end
-
-    local finishAt = deadlineMs + (PLAYBACK_FINISH_MARGIN_SECONDS * 1000)
-
-    while true do
-        if self.interruptRequested then
-            return false, "interrupted"
-        end
-
-        local remainingMs = finishAt - now()
-        if remainingMs <= 0 then
-            return true
-        end
-
-        local timerId = os.startTimer(remainingMs / 1000)
-
-        while true do
-            local event, value = os.pullEvent()
-
-            if event == INTERRUPT_EVENT then
-                if type(os.cancelTimer) == "function" then
-                    os.cancelTimer(timerId)
-                end
-                return false, "interrupted"
-            end
-
-            if event == "timer" and value == timerId then
-                break
-            end
-        end
-    end
-end
-
 -- function: Interrupt the current announcement when a higher-priority request arrives.
 function Player:interruptBelow(priority)
     priority = tonumber(priority) or 0
@@ -130,7 +73,7 @@ end
 function Player:_playAudioRun(paths)
     local pcm = {}
     local pcmCount = 0
-    local playbackDeadlineMs = nil
+    local submittedAudio = false
 
     for _, path in ipairs(paths) do
         if self.interruptRequested then
@@ -161,7 +104,7 @@ function Player:_playAudioRun(paths)
                             return false, "interrupted"
                         end
 
-                        playbackDeadlineMs = self:_extendPlaybackDeadline(playbackDeadlineMs, pcmCount)
+                        submittedAudio = true
                         pcm = {}
                         pcmCount = 0
                     end
@@ -176,10 +119,17 @@ function Player:_playAudioRun(paths)
             return false, "interrupted"
         end
 
-        playbackDeadlineMs = self:_extendPlaybackDeadline(playbackDeadlineMs, pcmCount)
+        submittedAudio = true
     end
 
-    return self:_waitUntilPlaybackDeadline(playbackDeadlineMs)
+    if submittedAudio then
+        local ready = self.speakers:waitUntilAllReady(INTERRUPT_EVENT)
+        if not ready or self.interruptRequested then
+            return false, "interrupted"
+        end
+    end
+
+    return true
 end
 
 -- function: Decode and play one DFPWM audio file with interrupt support.
