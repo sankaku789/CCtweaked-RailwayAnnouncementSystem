@@ -11,7 +11,7 @@ function GuidanceBell.new(options, logger)
     options = options or {}
 
     local intervalSeconds = tonumber(options.intervalSeconds) or DEFAULT_INTERVAL_SECONDS
-    if intervalSeconds <= 0 then
+    if intervalSeconds < 0 then
         intervalSeconds = DEFAULT_INTERVAL_SECONDS
     end
 
