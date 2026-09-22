@@ -121,12 +121,11 @@ function Scheduler:_scheduleGuidanceFrom(baseEpoch, delaySeconds, reason)
     local delay = math.max(0, tonumber(delaySeconds) or 0)
     self.guidanceNextAt = base + (delay * 1000)
 
-    if self.logger then
-        self.logger.event("Guidance timer", ("%s %.3fs baseEpoch=%d dueEpoch=%d"):format(
+    local quiet = reason == "bell duration+interval" or reason == "bell fallback interval"
+    if self.logger and not quiet then
+        self.logger.event("Guidance", ("%s %.1fs"):format(
             tostring(reason or "scheduled"),
-            delay,
-            base,
-            self.guidanceNextAt
+            delay
         ))
     end
 end
@@ -154,7 +153,7 @@ function Scheduler:_initializeGuidance()
 
     if not self:_guidanceAudioAvailable(self.guidanceConfig.path) then
         if self.logger then
-            self.logger.warn("Guidance bell disabled because audio is unavailable: " .. tostring(self.guidanceConfig.path))
+            self.logger.warn("Guidance bell disabled: audio unavailable")
         end
         return
     end
@@ -164,12 +163,9 @@ function Scheduler:_initializeGuidance()
     self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds, "startup initial")
 
     if self.logger then
-        self.logger.info(("Guidance bell enabled: initialDelay=%.3fs interval=%.3fs duration=%.3fs priority=%s file=%s"):format(
+        self.logger.info(("Guidance bell enabled (initial=%.1fs interval=%.1fs)"):format(
             self.guidanceConfig.initialDelaySeconds,
-            self.guidanceConfig.intervalSeconds,
-            self.guidanceDurationSeconds,
-            tostring(self.guidanceConfig.priority),
-            self.guidanceConfig.path
+            self.guidanceConfig.intervalSeconds
         ))
     end
 end
@@ -310,7 +306,7 @@ function Scheduler:_handleDeparture()
     end
 
     if self.logger then
-        self.logger.event("State", ("IDLE (departure) epoch=%d"):format(departureAt))
+        self.logger.event("State", "IDLE (departure)")
     end
 
     self:_handleStateChange()
@@ -326,7 +322,7 @@ function Scheduler:_handleDeparture()
             dwellSeconds = dwellTimeMs / 1000
             reason = "departure dwell+initial"
         elseif self.logger then
-            self.logger.warn("MTR dwell time unavailable for guidance bell; using initial from DEPARTURE event")
+            self.logger.warn("MTR dwell time unavailable; using departure initial fallback")
         end
 
         self:_scheduleGuidanceFrom(
@@ -340,7 +336,7 @@ end
 -- function: Handle a PASSING pulse without changing the periodic announcement mode.
 function Scheduler:_handlePassing()
     if self.logger then
-        self.logger.event("Passing", ("signal received (track=%s)"):format(tostring(self.config.trackNumber)))
+        self.logger.event("Passing", "signal")
     end
 
     self:_enqueue("passing")
@@ -411,10 +407,7 @@ function Scheduler:monitorPeriodic()
                     elseif currentTime >= dueAt then
                         local queued = self:_enqueue(cfg.type)
                         if queued and self.logger then
-                            self.logger.event("Periodic", ("%s fired (state=%s)"):format(
-                                tostring(cfg.type),
-                                tostring(currentState)
-                            ))
+                            self.logger.event("Periodic", tostring(cfg.type))
                         end
                         self.periodicNextAt[name] = currentTime + math.max(1000, intervalMs)
                     end
@@ -551,11 +544,7 @@ function Scheduler:processQueue()
             end
         else
             if self.logger and request.type ~= "guidance_bell" then
-                self.logger.info(("Playing %s announcement at priority %s (%d segment(s))."):format(
-                    tostring(request.type),
-                    tostring(request.priority),
-                    #segments
-                ))
+                self.logger.info("Playing: " .. tostring(request.type))
             end
 
             local onAudioStarted = nil
@@ -593,7 +582,7 @@ function Scheduler:processQueue()
             completed = self.player:playSegments(segments, request.priority, onAudioStarted)
 
             if not completed and self.logger and request.type ~= "guidance_bell" then
-                self.logger.info("Announcement interrupted: " .. tostring(request.type))
+                self.logger.info("Interrupted: " .. tostring(request.type))
             end
         end
 
