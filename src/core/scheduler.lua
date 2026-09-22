@@ -24,6 +24,7 @@ end
 function Scheduler.new(options)
     options.periodicNextAt = {}
     options.guidancePlaying = false
+    options.guidanceResumeAt = nil
     return setmetatable(options, Scheduler)
 end
 
@@ -35,7 +36,21 @@ end
 
 -- function: Return whether guidance bell playback is allowed for the current track state.
 function Scheduler:_guidanceBellAllowed()
-    return self.trackState:get() ~= "PLATFORM"
+    if self.trackState:get() == "PLATFORM" then
+        return false
+    end
+
+    return self.guidanceResumeAt == nil or now() >= self.guidanceResumeAt
+end
+
+-- function: Apply the guidance bell initial delay when leaving PLATFORM for IDLE.
+function Scheduler:_resetGuidanceBellResumeDelay(previousState)
+    if previousState ~= "PLATFORM" or not self.guidanceBell then
+        return
+    end
+
+    local delaySeconds = tonumber(self.guidanceBell.initialDelaySeconds) or 0
+    self.guidanceResumeAt = now() + (math.max(0, delaySeconds) * 1000)
 end
 
 -- function: Remove queued periodic announcement requests.
@@ -134,6 +149,7 @@ end
 
 -- function: Handle an APPROACH pulse and enable the PLATFORM periodic announcement mode.
 function Scheduler:_handleApproach()
+    self.guidanceResumeAt = nil
     self.trackState:set("PLATFORM")
 
     if self.logger then
@@ -146,7 +162,9 @@ end
 
 -- function: Handle a DEPARTURE pulse and enable the IDLE periodic announcement mode.
 function Scheduler:_handleDeparture()
+    local previousState = self.trackState:get()
     self.trackState:set("IDLE")
+    self:_resetGuidanceBellResumeDelay(previousState)
 
     if self.logger then
         self.logger.event("State", "IDLE (departure)")
@@ -168,7 +186,9 @@ end
 
 -- function: Handle the direct reset button and enable the IDLE periodic announcement mode.
 function Scheduler:_handleReset()
+    local previousState = self.trackState:get()
     self.trackState:set("IDLE")
+    self:_resetGuidanceBellResumeDelay(previousState)
     self:_invalidateMetadata()
 
     local priority = self:_preemptPriority()
