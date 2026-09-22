@@ -186,6 +186,36 @@ local function dwellTimeFromArrival(arrival)
     return departureTime - arrivalTime
 end
 
+-- function: Build a stable identity for one physical route platform from map coordinates.
+local function platformIdentityKey(station)
+    if type(station) ~= "table" then
+        return nil
+    end
+
+    local stationId = station.id
+    local platformName = station.name
+    local x = tonumber(station.x)
+    local y = tonumber(station.y)
+    local z = tonumber(station.z)
+
+    if type(stationId) ~= "string"
+        or type(platformName) ~= "string"
+        or x == nil
+        or y == nil
+        or z == nil
+    then
+        return nil
+    end
+
+    return table.concat({
+        trim(stationId),
+        trim(platformName),
+        tostring(x),
+        tostring(y),
+        tostring(z),
+    }, "\31")
+end
+
 -- function: Read and close a CC:Tweaked HTTP response handle.
 local function readResponse(response)
     local body = response.readAll()
@@ -193,14 +223,18 @@ local function readResponse(response)
     return body
 end
 
--- function: Preserve MTR route IDs as exact decimal strings before JSON decoding.
-local function preserveRouteIds(raw)
+-- function: Preserve large MTR route/platform IDs as exact decimal strings before JSON decoding.
+local function preserveExactIds(raw)
     if type(raw) ~= "string" then
         return raw
     end
 
-    return raw:gsub('(\"routeId\"%s*:%s*)(%-?%d+)', function(prefix, routeId)
+    raw = raw:gsub('(\"routeId\"%s*:%s*)(%-?%d+)', function(prefix, routeId)
         return prefix .. '\"' .. routeId .. '\"'
+    end)
+
+    return raw:gsub('(\"platformId\"%s*:%s*)(%-?%d+)', function(prefix, platformId)
+        return prefix .. '\"' .. platformId .. '\"'
     end)
 end
 
@@ -219,7 +253,7 @@ function MtrAdapter.new(options)
 end
 
 -- function: Request and decode one TSC system-map HTTP endpoint.
-function MtrAdapter:_requestMap(endpoint, requestBody, keepRouteIdsExact)
+function MtrAdapter:_requestMap(endpoint, requestBody, keepExactIds)
     if not self.baseUrl then
         error("MTR adapter baseUrl is not configured")
     end
@@ -258,8 +292,8 @@ function MtrAdapter:_requestMap(endpoint, requestBody, keepRouteIdsExact)
     end
 
     local raw = readResponse(response)
-    if keepRouteIdsExact then
-        raw = preserveRouteIds(raw)
+    if keepExactIds then
+        raw = preserveExactIds(raw)
     end
 
     local payload = textutils.unserializeJSON(raw)
@@ -319,13 +353,19 @@ function MtrAdapter:_resolveStationIdHex()
     return matchedId
 end
 
--- function: Inspect how many route candidates use the configured platform.
+-- function: Inspect how many distinct physical platforms match the configured track.
 function MtrAdapter:getPlatformDwellTiming(context)
     if self.platformIdHex ~= "" then
+        local arrival = self:_requestArrival(context)
+        if not arrival then
+            error("MTR platform dwell time is unavailable for the direct platform ID")
+        end
+
         return {
-            dynamic = true,
-            candidateCount = nil,
-            dwellTimeMs = nil,
+            dynamic = false,
+            platformCount = 1,
+            candidateCount = 1,
+            dwellTimeMs = dwellTimeFromArrival(arrival),
         }
     end
 
@@ -337,7 +377,8 @@ function MtrAdapter:getPlatformDwellTiming(context)
         error("MTR stations-and-routes response does not contain routes")
     end
 
-    local candidateCount = 0
+    local platforms = {}
+    local platformCount = 0
     local singleDwellTime = nil
 
     for _, route in ipairs(routes) do
@@ -345,33 +386,43 @@ function MtrAdapter:getPlatformDwellTiming(context)
         if type(stations) == "table" then
             for _, station in ipairs(stations) do
                 local stationId = type(station) == "table" and station.id or nil
-                local candidate = type(station) == "table" and tonumber(station.dwellTime) or nil
+                local dwellTimeMs = type(station) == "table" and tonumber(station.dwellTime) or nil
 
                 if type(stationId) == "string"
                     and trim(stationId) == stationIdHex
                     and nameMatches(station.name, platformName)
-                    and candidate
-                    and candidate >= 0
+                    and dwellTimeMs
+                    and dwellTimeMs >= 0
                 then
-                    candidateCount = candidateCount + 1
-                    if candidateCount == 1 then
-                        singleDwellTime = candidate
+                    local platformKey = platformIdentityKey(station)
+                    if not platformKey then
+                        error("MTR route platform does not contain a stable physical position")
+                    end
+
+                    if platforms[platformKey] == nil then
+                        platforms[platformKey] = dwellTimeMs
+                        platformCount = platformCount + 1
+
+                        if platformCount == 1 then
+                            singleDwellTime = dwellTimeMs
+                        end
                     end
                 end
             end
         end
     end
 
-    if candidateCount == 0 then
+    if platformCount == 0 then
         error(("MTR platform dwell time was not found: station=%s platform=%s"):format(
             self.stationName,
             platformName
         ))
     end
 
-    if candidateCount == 1 then
+    if platformCount == 1 then
         return {
             dynamic = false,
+            platformCount = 1,
             candidateCount = 1,
             dwellTimeMs = singleDwellTime,
         }
@@ -379,19 +430,39 @@ function MtrAdapter:getPlatformDwellTiming(context)
 
     return {
         dynamic = true,
-        candidateCount = candidateCount,
+        platformCount = platformCount,
+        candidateCount = platformCount,
         dwellTimeMs = nil,
     }
 end
 
--- function: Return the dwell time of the train currently selected for this platform.
-function MtrAdapter:getCurrentPlatformDwellTimeMs(context)
+-- function: Return the current train/platform pair used for dynamic departure timing.
+function MtrAdapter:getCurrentPlatformTiming(context)
     local arrival = self:_requestArrival(context)
     if not arrival then
-        error("MTR current platform dwell time is unavailable")
+        error("MTR current platform timing is unavailable")
     end
 
-    return dwellTimeFromArrival(arrival)
+    local platformId = arrival.platformId
+    if platformId ~= nil then
+        platformId = trim(tostring(platformId))
+    end
+
+    if not platformId or platformId == "" then
+        error("MTR current arrival does not contain a platform ID")
+    end
+
+    return {
+        dwellTimeMs = dwellTimeFromArrival(arrival),
+        platformId = platformId,
+        platformName = arrival.platformName,
+        routeId = arrival.routeId,
+    }
+end
+
+-- function: Return the dwell time of the current train on its resolved physical platform.
+function MtrAdapter:getCurrentPlatformDwellTimeMs(context)
+    return self:getCurrentPlatformTiming(context).dwellTimeMs
 end
 
 -- function: Return the dwell time in milliseconds for the configured platform.
