@@ -7,7 +7,6 @@ local DFPWM_READ_SIZE = 4 * 1024
 local PCM_CHUNK_SIZE = 128 * 1024
 local PLAYBACK_COMPLETION_BARRIER = { 0 }
 local INTERRUPT_EVENT = "railway_player_interrupt"
-local TRACE_ID = "guidance-timing-v2"
 
 -- function: Check whether a playback item is an explicit pause directive.
 local function isPause(item)
@@ -62,7 +61,7 @@ function Player:interruptBelow(priority)
     os.queueEvent(INTERRUPT_EVENT)
 
     if self.logger then
-        self.logger.info(("Interrupted priority %s announcement for priority %s request."):format(
+        self.logger.info(("Playback interrupted: %s -> %s"):format(
             tostring(self.currentPriority),
             tostring(priority)
         ))
@@ -183,38 +182,20 @@ function Player:playSegments(segments, priority, onAudioStarted)
     self.currentPriority = tonumber(priority) or 0
     self.interruptRequested = false
 
-    local playbackPriority = self.currentPriority
-    local invokedAt = os.epoch("utc")
-    local actualStartedAt = nil
     local startedCallback = onAudioStarted
-
-    if self.logger and type(self.logger.event) == "function" then
-        self.logger.event("Playback trace", ("%s begin priority=%s epoch=%d"):format(
-            TRACE_ID,
-            tostring(playbackPriority),
-            invokedAt
-        ))
-    end
+    local started = false
 
     local function markPlaybackStarted(epoch)
-        if actualStartedAt ~= nil then
+        if started then
             return
         end
 
-        actualStartedAt = tonumber(epoch) or os.epoch("utc")
-
-        if self.logger and type(self.logger.event) == "function" then
-            self.logger.event("Playback trace", ("%s audio-start priority=%s epoch=%d"):format(
-                TRACE_ID,
-                tostring(playbackPriority),
-                actualStartedAt
-            ))
-        end
+        started = true
 
         if startedCallback then
             local callback = startedCallback
             startedCallback = nil
-            callback(actualStartedAt)
+            callback(tonumber(epoch) or os.epoch("utc"))
         end
     end
 
@@ -256,19 +237,6 @@ function Player:playSegments(segments, priority, onAudioStarted)
         self.speakers:stop()
         self.speakers:drainEvents()
         completed = false
-    end
-
-    local finishedAt = os.epoch("utc")
-    local durationBase = actualStartedAt or invokedAt
-
-    if self.logger and type(self.logger.event) == "function" then
-        self.logger.event("Playback trace", ("%s end priority=%s completed=%s durationMs=%d epoch=%d"):format(
-            TRACE_ID,
-            tostring(playbackPriority),
-            tostring(completed),
-            finishedAt - durationBase,
-            finishedAt
-        ))
     end
 
     self.currentPriority = nil
