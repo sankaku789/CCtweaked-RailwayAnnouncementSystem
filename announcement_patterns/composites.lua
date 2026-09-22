@@ -12,7 +12,6 @@ return {
     train_info = {
         "train_class",
         "destination_sentence",
-        "next_train_end",
     },
 
     stopped_train_info = {
