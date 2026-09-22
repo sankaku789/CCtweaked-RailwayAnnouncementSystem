@@ -234,8 +234,68 @@ function Scheduler:_invalidateMetadata()
     end
 end
 
+-- function: Resolve the dwell and melody delay for the current departure event.
+function Scheduler:_resolveDepartureTiming()
+    local timing = type(self.departureTiming) == "table" and self.departureTiming or {}
+    local fallbackDelaySeconds = math.max(
+        0,
+        tonumber(timing.fallbackDelaySeconds) or tonumber(self.config.TIMEOUT_TIMING) or 0
+    )
+    local dwellTimeMs = tonumber(timing.dwellTimeMs)
+    local delaySeconds = tonumber(timing.staticDelaySeconds) or fallbackDelaySeconds
+
+    if timing.dynamic ~= true then
+        return math.max(0, delaySeconds), dwellTimeMs
+    end
+
+    dwellTimeMs = nil
+    local adapter = self.departureTimingAdapter
+    local getter = nil
+
+    if adapter and type(adapter.getCurrentPlatformDwellTimeMs) == "function" then
+        getter = adapter.getCurrentPlatformDwellTimeMs
+    elseif adapter and type(adapter.getPlatformDwellTimeMs) == "function" then
+        getter = adapter.getPlatformDwellTimeMs
+    end
+
+    if getter then
+        local ok, currentDwellTimeMs = pcall(getter, adapter, {
+            track = self.config.trackNumber,
+        })
+
+        if ok then
+            currentDwellTimeMs = tonumber(currentDwellTimeMs)
+            if currentDwellTimeMs and currentDwellTimeMs >= 0 then
+                dwellTimeMs = currentDwellTimeMs
+            end
+        elseif self.logger then
+            self.logger.warn("Dynamic departure timing failed: " .. tostring(currentDwellTimeMs))
+        end
+    elseif self.logger then
+        self.logger.warn("Dynamic departure timing is unavailable")
+    end
+
+    local melodySeconds = tonumber(timing.melodySeconds)
+    local leadSeconds = math.max(0, tonumber(timing.leadSeconds) or 0)
+
+    if dwellTimeMs and melodySeconds then
+        delaySeconds = math.max(0, (dwellTimeMs / 1000) - melodySeconds - leadSeconds)
+    else
+        delaySeconds = fallbackDelaySeconds
+    end
+
+    if self.logger and dwellTimeMs then
+        self.logger.event("Departure timing", ("dynamic dwell=%.1fs delay=%.1fs"):format(
+            dwellTimeMs / 1000,
+            delaySeconds
+        ))
+    end
+
+    return delaySeconds, dwellTimeMs
+end
+
 -- function: Queue an announcement request with configured priority and expiry.
-function Scheduler:_enqueue(typeName, priorityOverride)
+function Scheduler:_enqueue(typeName, priorityOverride, requestOptions)
     local priority = tonumber(priorityOverride)
     if priority == nil then
         priority = priorityFor(self.config, typeName)
@@ -250,6 +310,10 @@ function Scheduler:_enqueue(typeName, priorityOverride)
         priority = priority,
         createdAt = createdAt,
     }
+
+    if type(requestOptions) == "table" and requestOptions.departurePlayAt ~= nil then
+        request.departurePlayAt = tonumber(requestOptions.departurePlayAt)
+    end
 
     if typeName == "guidance_bell" then
         request.guidanceGeneration = self.guidanceGeneration
@@ -311,10 +375,13 @@ function Scheduler:_handleDeparture()
 
     self:_handleStateChange()
     self:_invalidateMetadata()
-    self:_enqueue("departure")
+
+    local departureDelaySeconds, dwellTimeMs = self:_resolveDepartureTiming()
+    self:_enqueue("departure", nil, {
+        departurePlayAt = departureAt + (departureDelaySeconds * 1000),
+    })
 
     if self.guidanceAvailable then
-        local dwellTimeMs = tonumber(self.departureDwellTimeMs)
         local dwellSeconds = 0
         local reason = "departure initial fallback"
 
@@ -395,14 +462,15 @@ function Scheduler:monitorPeriodic()
         for name, cfg in pairs(self.config.periodic or {}) do
             if type(cfg) == "table" and type(cfg.type) == "string" then
                 if cfg.enabled == true and cfg.state == currentState then
-                    local dueAt = self.periodicNextAt[name]
                     local intervalMs = tonumber(cfg.intervalMs) or 0
 
+                    local initialDelayMs = tonumber(cfg.initialDelayMs)
+                    if initialDelayMs == nil then
+                        initialDelayMs = intervalMs
+                    end
+
+                    local dueAt = self.periodicNextAt[name]
                     if dueAt == nil then
-                        local initialDelayMs = tonumber(cfg.initialDelayMs)
-                        if initialDelayMs == nil then
-                            initialDelayMs = intervalMs
-                        end
                         self.periodicNextAt[name] = currentTime + math.max(0, initialDelayMs)
                     elseif currentTime >= dueAt then
                         local queued = self:_enqueue(cfg.type)
@@ -518,7 +586,15 @@ function Scheduler:processQueue()
         end
 
         if request.type == "departure" then
-            local delaySeconds = tonumber(self.config.TIMEOUT_TIMING) or 0
+            local playAt = tonumber(request.departurePlayAt)
+            local delaySeconds
+
+            if playAt then
+                delaySeconds = math.max(0, (playAt - now()) / 1000)
+            else
+                delaySeconds = math.max(0, tonumber(self.config.TIMEOUT_TIMING) or 0)
+            end
+
             if delaySeconds > 0 then
                 sleep(delaySeconds)
             end
