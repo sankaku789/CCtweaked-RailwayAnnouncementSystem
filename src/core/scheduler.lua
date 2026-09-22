@@ -284,14 +284,22 @@ function Scheduler:_handleDeparture()
     self:_invalidateMetadata()
     self:_enqueue("departure")
 
-    -- initialDelaySeconds is measured from the DEPARTURE event itself. If the
-    -- departure announcement is still using Player when the deadline arrives,
-    -- _guidanceDue keeps the bell waiting until normal playback has finished.
     if self.guidanceAvailable then
+        local dwellTimeMs = tonumber(self.departureDwellTimeMs)
+        local dwellSeconds = 0
+        local reason = "departure initial fallback"
+
+        if dwellTimeMs and dwellTimeMs >= 0 then
+            dwellSeconds = dwellTimeMs / 1000
+            reason = "departure dwell+initial"
+        elseif self.logger then
+            self.logger.warn("MTR dwell time unavailable for guidance bell; using initial from DEPARTURE event")
+        end
+
         self:_scheduleGuidanceFrom(
             departureAt,
-            self.guidanceConfig.initialDelaySeconds,
-            "departure initial"
+            dwellSeconds + self.guidanceConfig.initialDelaySeconds,
+            reason
         )
     end
 end
