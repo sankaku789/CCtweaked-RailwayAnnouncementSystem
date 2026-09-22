@@ -7,6 +7,7 @@ local DFPWM_READ_SIZE = 4 * 1024
 local PCM_CHUNK_SIZE = 128 * 1024
 local PLAYBACK_COMPLETION_BARRIER = { 0 }
 local INTERRUPT_EVENT = "railway_player_interrupt"
+local TRACE_ID = "guidance-timing-v1"
 
 -- function: Check whether a playback item is an explicit pause directive.
 local function isPause(item)
@@ -176,6 +177,17 @@ function Player:playSegments(segments, priority)
     self.currentPriority = tonumber(priority) or 0
     self.interruptRequested = false
 
+    local playbackPriority = self.currentPriority
+    local startedAt = os.epoch("utc")
+
+    if self.logger and type(self.logger.event) == "function" then
+        self.logger.event("Playback trace", ("%s start priority=%s epoch=%d"):format(
+            TRACE_ID,
+            tostring(playbackPriority),
+            startedAt
+        ))
+    end
+
     local completed = true
     local index = 1
 
@@ -214,6 +226,18 @@ function Player:playSegments(segments, priority)
         self.speakers:stop()
         self.speakers:drainEvents()
         completed = false
+    end
+
+    local finishedAt = os.epoch("utc")
+
+    if self.logger and type(self.logger.event) == "function" then
+        self.logger.event("Playback trace", ("%s end priority=%s completed=%s durationMs=%d epoch=%d"):format(
+            TRACE_ID,
+            tostring(playbackPriority),
+            tostring(completed),
+            finishedAt - startedAt,
+            finishedAt
+        ))
     end
 
     self.currentPriority = nil
