@@ -3,6 +3,7 @@ Scheduler.__index = Scheduler
 
 local GUIDANCE_CHECK_SECONDS = 0.05
 local DEFAULT_GUIDANCE_PATH = "audio/guidance/bell.dfpwm"
+local DEFAULT_GUIDANCE_INTERVAL_SECONDS = 10
 local DEFAULT_GUIDANCE_PRIORITY = -1
 
 -- function: Return the current UTC epoch time in milliseconds.
@@ -49,7 +50,7 @@ function Scheduler:_guidanceConfig()
             enabled = false,
             path = DEFAULT_GUIDANCE_PATH,
             initialDelaySeconds = 0,
-            intervalSeconds = 0,
+            intervalSeconds = DEFAULT_GUIDANCE_INTERVAL_SECONDS,
             priority = DEFAULT_GUIDANCE_PRIORITY,
         }
     end
@@ -59,11 +60,16 @@ function Scheduler:_guidanceConfig()
         path = DEFAULT_GUIDANCE_PATH
     end
 
+    local intervalSeconds = tonumber(cfg.intervalSeconds)
+    if not intervalSeconds or intervalSeconds <= 0 then
+        intervalSeconds = DEFAULT_GUIDANCE_INTERVAL_SECONDS
+    end
+
     return {
         enabled = cfg.enabled == true,
         path = path,
         initialDelaySeconds = math.max(0, tonumber(cfg.initialDelaySeconds) or 0),
-        intervalSeconds = math.max(0, tonumber(cfg.intervalSeconds) or 0),
+        intervalSeconds = intervalSeconds,
         priority = tonumber(cfg.priority) or DEFAULT_GUIDANCE_PRIORITY,
     }
 end
@@ -362,20 +368,32 @@ function Scheduler:monitorGuidanceBell()
 
     while true do
         if self:_guidanceMayStart() then
-            local startedAt = now()
-
-            -- intervalSeconds is a start-to-start interval. The next deadline is
-            -- based on the actual start time, so a delayed bell never causes a
-            -- shortened catch-up interval afterwards.
-            self.guidanceNextAt = startedAt + (self.guidanceConfig.intervalSeconds * 1000)
+            -- Clear the due deadline before starting. The actual next deadline is
+            -- written only when the first PCM chunk is accepted by the speaker.
+            self.guidanceNextAt = nil
             self.guidancePlaying = true
 
+            local started = false
             local completed = self.player:playSegments(
                 { self.guidanceConfig.path },
-                self.guidanceConfig.priority
+                self.guidanceConfig.priority,
+                function()
+                    started = true
+                    self.guidanceNextAt = now() + (self.guidanceConfig.intervalSeconds * 1000)
+                end
             )
 
             self.guidancePlaying = false
+
+            if not started
+                and self.guidanceAvailable
+                and self.trackState:get() ~= "PLATFORM"
+                and not self.guidanceWaitingForDeparture
+            then
+                -- Audio was validated at startup, but recover safely if it could not
+                -- start because the peripheral state changed unexpectedly.
+                self:_scheduleGuidanceAfter(self.guidanceConfig.intervalSeconds)
+            end
 
             if not completed and self.logger then
                 self.logger.info("Guidance bell interrupted by a normal announcement.")
