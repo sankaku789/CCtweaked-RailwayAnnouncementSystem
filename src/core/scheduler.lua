@@ -80,22 +80,30 @@ function Scheduler:_guidanceAudioAvailable(path)
         and not fs.isDir(path)
 end
 
--- function: Set the next guidance bell deadline from the current time.
-function Scheduler:_scheduleGuidance(delaySeconds, reason)
+-- function: Set the next guidance bell deadline from an explicit epoch timestamp.
+function Scheduler:_scheduleGuidanceFrom(baseEpoch, delaySeconds, reason)
     if not self.guidanceAvailable then
         self.guidanceNextAt = nil
         return
     end
 
+    local base = tonumber(baseEpoch) or now()
     local delay = math.max(0, tonumber(delaySeconds) or 0)
-    self.guidanceNextAt = now() + (delay * 1000)
+    self.guidanceNextAt = base + (delay * 1000)
 
     if self.logger then
-        self.logger.event("Guidance timer", ("%s %.3fs"):format(
+        self.logger.event("Guidance timer", ("%s %.3fs baseEpoch=%d dueEpoch=%d"):format(
             tostring(reason or "scheduled"),
-            delay
+            delay,
+            base,
+            self.guidanceNextAt
         ))
     end
+end
+
+-- function: Set the next guidance bell deadline from the current time.
+function Scheduler:_scheduleGuidance(delaySeconds, reason)
+    self:_scheduleGuidanceFrom(now(), delaySeconds, reason)
 end
 
 -- function: Remove queued guidance work and invalidate older guidance playback callbacks.
@@ -450,10 +458,11 @@ function Scheduler:_afterRequest(request, completed, hadSegments)
         return
     end
 
-    -- intervalSeconds is the quiet interval from the actual end of this bell
-    -- to the start of the next bell. Player returns only after its completion
-    -- barrier has been accepted by every connected speaker.
-    self:_scheduleGuidance(self.guidanceConfig.intervalSeconds, "bell interval")
+    -- Normally interval is scheduled from the actual first PCM submission callback.
+    -- If playback produced no audio-start callback, schedule a retry from here.
+    if not request.guidanceStarted then
+        self:_scheduleGuidance(self.guidanceConfig.intervalSeconds, "bell retry")
+    end
 end
 
 -- function: Process queued announcements sequentially with priority-aware interruption.
@@ -494,7 +503,23 @@ function Scheduler:processQueue()
                 ))
             end
 
-            completed = self.player:playSegments(segments, request.priority)
+            local onAudioStarted = nil
+            if request.type == "guidance_bell" then
+                onAudioStarted = function(startedAt)
+                    if request.guidanceGeneration ~= self.guidanceGeneration then
+                        return
+                    end
+
+                    request.guidanceStarted = true
+                    self:_scheduleGuidanceFrom(
+                        startedAt,
+                        self.guidanceConfig.intervalSeconds,
+                        "bell interval"
+                    )
+                end
+            end
+
+            completed = self.player:playSegments(segments, request.priority, onAudioStarted)
 
             if not completed and self.logger and request.type ~= "guidance_bell" then
                 self.logger.info("Announcement interrupted: " .. tostring(request.type))
