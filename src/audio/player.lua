@@ -70,18 +70,10 @@ function Player:interruptBelow(priority)
 end
 
 -- function: Decode adjacent DFPWM files into one continuous PCM stream and play it without file-boundary waits.
-function Player:_playAudioRun(paths, onAudioStarted)
+function Player:_playAudioRun(paths)
     local pcm = {}
     local pcmCount = 0
     local submittedAudio = false
-
-    local function markStarted()
-        if onAudioStarted then
-            local callback = onAudioStarted
-            onAudioStarted = nil
-            callback()
-        end
-    end
 
     for _, path in ipairs(paths) do
         if self.interruptRequested then
@@ -112,7 +104,6 @@ function Player:_playAudioRun(paths, onAudioStarted)
                             return false, "interrupted"
                         end
 
-                        markStarted()
                         submittedAudio = true
                         pcm = {}
                         pcmCount = 0
@@ -128,7 +119,6 @@ function Player:_playAudioRun(paths, onAudioStarted)
             return false, "interrupted"
         end
 
-        markStarted()
         submittedAudio = true
     end
 
@@ -143,8 +133,8 @@ function Player:_playAudioRun(paths, onAudioStarted)
 end
 
 -- function: Decode and play one DFPWM audio file with interrupt support.
-function Player:playFile(path, onAudioStarted)
-    return self:_playAudioRun({ path }, onAudioStarted)
+function Player:playFile(path)
+    return self:_playAudioRun({ path })
 end
 
 -- function: Wait for a pattern pause while remaining responsive to announcement interrupts.
@@ -177,24 +167,12 @@ function Player:_waitPause(seconds)
 end
 
 -- function: Play an ordered list of audio and pause items at one announcement priority.
-function Player:playSegments(segments, priority, onAudioStarted)
+function Player:playSegments(segments, priority)
     self.currentPriority = tonumber(priority) or 0
     self.interruptRequested = false
 
     local completed = true
     local index = 1
-    local started = false
-
-    local function markStarted()
-        if started then
-            return
-        end
-
-        started = true
-        if onAudioStarted then
-            onAudioStarted()
-        end
-    end
 
     while index <= #segments do
         local item = segments[index]
@@ -219,7 +197,7 @@ function Player:playSegments(segments, priority, onAudioStarted)
                 index = index + 1
             end
 
-            local ok, reason = self:_playAudioRun(paths, markStarted)
+            local ok, reason = self:_playAudioRun(paths)
             if not ok and reason == "interrupted" then
                 completed = false
                 break
