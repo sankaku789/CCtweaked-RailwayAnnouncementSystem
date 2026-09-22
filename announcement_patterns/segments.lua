@@ -35,7 +35,7 @@ return {
 
     destination_sentence = {
         resolver = "destination",
-        directory = "audio/destination/desu",
+        directory = "audio/destination/station",
     },
 
     station_name = {
@@ -87,4 +87,5 @@ return {
     next_train_intro = "audio/next_train/train.dfpwm",
     next_train_prefix = "audio/next_train/prefix.dfpwm",
     next_train_melody = "audio/melody/next.dfpwm"
+    next_train_end = "audio/next_train/end.dfpwm"
 }

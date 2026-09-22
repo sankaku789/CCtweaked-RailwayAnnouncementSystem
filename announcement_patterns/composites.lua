@@ -12,7 +12,7 @@ return {
     train_info = {
         "train_class",
         "destination_sentence",
-        "?car_count_info",
+        "next_train_end",
     },
 
     stopped_train_info = {
@@ -26,5 +26,6 @@ return {
         "track_ni",
         "next_train_intro",
         "train_info",
+        "?car_count_info",
     },
 }
