@@ -319,15 +319,14 @@ function MtrAdapter:_resolveStationIdHex()
     return matchedId
 end
 
--- function: Return the dwell time in milliseconds for the configured platform.
-function MtrAdapter:getPlatformDwellTimeMs(context)
+-- function: Inspect how many route candidates use the configured platform.
+function MtrAdapter:getPlatformDwellTiming(context)
     if self.platformIdHex ~= "" then
-        local arrival = self:_requestArrival(context)
-        if not arrival then
-            error("MTR platform dwell time is unavailable for the direct platform ID")
-        end
-
-        return dwellTimeFromArrival(arrival)
+        return {
+            dynamic = true,
+            candidateCount = nil,
+            dwellTimeMs = nil,
+        }
     end
 
     local stationIdHex = self:_resolveStationIdHex()
@@ -338,8 +337,8 @@ function MtrAdapter:getPlatformDwellTimeMs(context)
         error("MTR stations-and-routes response does not contain routes")
     end
 
-    local dwellTime = nil
-    local ambiguous = false
+    local candidateCount = 0
+    local singleDwellTime = nil
 
     for _, route in ipairs(routes) do
         local stations = type(route) == "table" and route.stations or nil
@@ -354,33 +353,55 @@ function MtrAdapter:getPlatformDwellTimeMs(context)
                     and candidate
                     and candidate >= 0
                 then
-                    if dwellTime == nil then
-                        dwellTime = candidate
-                    elseif candidate ~= dwellTime then
-                        ambiguous = true
+                    candidateCount = candidateCount + 1
+                    if candidateCount == 1 then
+                        singleDwellTime = candidate
                     end
                 end
             end
         end
     end
 
-    if dwellTime == nil then
+    if candidateCount == 0 then
         error(("MTR platform dwell time was not found: station=%s platform=%s"):format(
             self.stationName,
             platformName
         ))
     end
 
-    if not ambiguous then
-        return dwellTime
+    if candidateCount == 1 then
+        return {
+            dynamic = false,
+            candidateCount = 1,
+            dwellTimeMs = singleDwellTime,
+        }
     end
 
+    return {
+        dynamic = true,
+        candidateCount = candidateCount,
+        dwellTimeMs = nil,
+    }
+end
+
+-- function: Return the dwell time of the train currently selected for this platform.
+function MtrAdapter:getCurrentPlatformDwellTimeMs(context)
     local arrival = self:_requestArrival(context)
     if not arrival then
-        error("MTR dynamic platform dwell time is unavailable for ambiguous platform: " .. platformName)
+        error("MTR current platform dwell time is unavailable")
     end
 
     return dwellTimeFromArrival(arrival)
+end
+
+-- function: Return the dwell time in milliseconds for the configured platform.
+function MtrAdapter:getPlatformDwellTimeMs(context)
+    local timing = self:getPlatformDwellTiming(context)
+    if timing.dynamic then
+        return self:getCurrentPlatformDwellTimeMs(context)
+    end
+
+    return timing.dwellTimeMs
 end
 
 -- function: Build an arrivals request for a direct platform ID or the announcement track context.
