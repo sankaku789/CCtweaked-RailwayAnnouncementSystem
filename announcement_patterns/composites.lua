@@ -27,4 +27,9 @@ return {
         "train_info",
         "?car_count_info",
     },
+
+    next_train_announcement = {
+        "?next_train_melody",
+        "next_train_info",
+    },
 }
