@@ -7,7 +7,7 @@ local DFPWM_READ_SIZE = 4 * 1024
 local PCM_CHUNK_SIZE = 128 * 1024
 local PLAYBACK_COMPLETION_BARRIER = { 0 }
 local INTERRUPT_EVENT = "railway_player_interrupt"
-local TRACE_ID = "guidance-timing-v1"
+local TRACE_ID = "guidance-timing-v2"
 
 -- function: Check whether a playback item is an explicit pause directive.
 local function isPause(item)
@@ -72,10 +72,18 @@ function Player:interruptBelow(priority)
 end
 
 -- function: Decode adjacent DFPWM files into one continuous PCM stream and play it without file-boundary waits.
-function Player:_playAudioRun(paths)
+function Player:_playAudioRun(paths, onAudioStarted)
     local pcm = {}
     local pcmCount = 0
     local submittedAudio = false
+
+    local function markStarted()
+        if onAudioStarted then
+            local callback = onAudioStarted
+            onAudioStarted = nil
+            callback(os.epoch("utc"))
+        end
+    end
 
     for _, path in ipairs(paths) do
         if self.interruptRequested then
@@ -106,6 +114,7 @@ function Player:_playAudioRun(paths)
                             return false, "interrupted"
                         end
 
+                        markStarted()
                         submittedAudio = true
                         pcm = {}
                         pcmCount = 0
@@ -121,14 +130,11 @@ function Player:_playAudioRun(paths)
             return false, "interrupted"
         end
 
+        markStarted()
         submittedAudio = true
     end
 
     if submittedAudio then
-        -- A speaker buffers only one playAudio call at a time. This silent one-sample
-        -- barrier cannot be accepted until the final real audio buffer has finished.
-        -- playChunk retries after speaker_audio_empty events, so stale events cannot
-        -- make this completion boundary fire early.
         local accepted = self.speakers:playChunk(PLAYBACK_COMPLETION_BARRIER, INTERRUPT_EVENT)
         if not accepted or self.interruptRequested then
             return false, "interrupted"
@@ -139,8 +145,8 @@ function Player:_playAudioRun(paths)
 end
 
 -- function: Decode and play one DFPWM audio file with interrupt support.
-function Player:playFile(path)
-    return self:_playAudioRun({ path })
+function Player:playFile(path, onAudioStarted)
+    return self:_playAudioRun({ path }, onAudioStarted)
 end
 
 -- function: Wait for a pattern pause while remaining responsive to announcement interrupts.
@@ -173,19 +179,43 @@ function Player:_waitPause(seconds)
 end
 
 -- function: Play an ordered list of audio and pause items at one announcement priority.
-function Player:playSegments(segments, priority)
+function Player:playSegments(segments, priority, onAudioStarted)
     self.currentPriority = tonumber(priority) or 0
     self.interruptRequested = false
 
     local playbackPriority = self.currentPriority
-    local startedAt = os.epoch("utc")
+    local invokedAt = os.epoch("utc")
+    local actualStartedAt = nil
+    local startedCallback = onAudioStarted
 
     if self.logger and type(self.logger.event) == "function" then
-        self.logger.event("Playback trace", ("%s start priority=%s epoch=%d"):format(
+        self.logger.event("Playback trace", ("%s begin priority=%s epoch=%d"):format(
             TRACE_ID,
             tostring(playbackPriority),
-            startedAt
+            invokedAt
         ))
+    end
+
+    local function markPlaybackStarted(epoch)
+        if actualStartedAt ~= nil then
+            return
+        end
+
+        actualStartedAt = tonumber(epoch) or os.epoch("utc")
+
+        if self.logger and type(self.logger.event) == "function" then
+            self.logger.event("Playback trace", ("%s audio-start priority=%s epoch=%d"):format(
+                TRACE_ID,
+                tostring(playbackPriority),
+                actualStartedAt
+            ))
+        end
+
+        if startedCallback then
+            local callback = startedCallback
+            startedCallback = nil
+            callback(actualStartedAt)
+        end
     end
 
     local completed = true
@@ -214,7 +244,7 @@ function Player:playSegments(segments, priority)
                 index = index + 1
             end
 
-            local ok, reason = self:_playAudioRun(paths)
+            local ok, reason = self:_playAudioRun(paths, markPlaybackStarted)
             if not ok and reason == "interrupted" then
                 completed = false
                 break
@@ -229,13 +259,14 @@ function Player:playSegments(segments, priority)
     end
 
     local finishedAt = os.epoch("utc")
+    local durationBase = actualStartedAt or invokedAt
 
     if self.logger and type(self.logger.event) == "function" then
         self.logger.event("Playback trace", ("%s end priority=%s completed=%s durationMs=%d epoch=%d"):format(
             TRACE_ID,
             tostring(playbackPriority),
             tostring(completed),
-            finishedAt - startedAt,
+            finishedAt - durationBase,
             finishedAt
         ))
     end
