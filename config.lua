@@ -32,6 +32,17 @@ return {
         reconnectDelay = 1,
     },
 
+    guidanceBell = {
+        enabled = true,
+        path = "audio/guidance/bell.dfpwm",
+        -- First bell after startup and after the departure announcement completes.
+        initialDelaySeconds = 3,
+        -- Start-to-start interval between guidance bells.
+        intervalSeconds = 10,
+        -- Must remain below every normal announcement priority.
+        priority = -1,
+    },
+
     adapter = {
         module = "mtr",
         cacheTtlMs = 30000,
