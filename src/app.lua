@@ -78,7 +78,7 @@ local function buildDepartureTiming(adapter, resolver)
 
     local timing = {
         dynamic = false,
-        candidateCount = nil,
+        platformCount = nil,
         dwellTimeMs = nil,
         melodySeconds = melodySeconds,
         melodyPath = melodyPath,
@@ -107,7 +107,7 @@ local function buildDepartureTiming(adapter, resolver)
 
         if type(profile) == "table" then
             timing.dynamic = profile.dynamic == true
-            timing.candidateCount = tonumber(profile.candidateCount)
+            timing.platformCount = tonumber(profile.platformCount) or tonumber(profile.candidateCount)
             timing.dwellTimeMs = tonumber(profile.dwellTimeMs)
         end
     elseif type(adapter.getPlatformDwellTimeMs) == "function" then
@@ -124,8 +124,8 @@ local function buildDepartureTiming(adapter, resolver)
     end
 
     if timing.dynamic then
-        log.event("Departure timing", ("dynamic candidates=%s"):format(
-            timing.candidateCount and tostring(timing.candidateCount) or "?"
+        log.event("Departure timing", ("dynamic platforms=%s"):format(
+            timing.platformCount and tostring(timing.platformCount) or "?"
         ))
         return timing
     end
@@ -134,7 +134,8 @@ local function buildDepartureTiming(adapter, resolver)
         local dwellSeconds = timing.dwellTimeMs / 1000
         timing.staticDelaySeconds = math.max(0, dwellSeconds - melodySeconds - leadSeconds)
 
-        log.event("Departure timing", ("static dwell=%.1fs delay=%.1fs"):format(
+        log.event("Departure timing", ("static platforms=%s dwell=%.1fs delay=%.1fs"):format(
+            timing.platformCount and tostring(timing.platformCount) or "1",
             dwellSeconds,
             timing.staticDelaySeconds
         ))
