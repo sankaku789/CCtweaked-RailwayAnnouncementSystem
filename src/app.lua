@@ -58,19 +58,19 @@ local function departureMelodyDurationSeconds(resolver)
     return fs.getSize(path) / DFPWM_BYTES_PER_SECOND, path, nil
 end
 
--- function: Calculate the internal departure delay from MTR dwell time and melody duration.
+-- function: Calculate the internal departure delay and return the MTR dwell time.
 local function configureDepartureTiming(adapter, resolver)
     local fallbackDelaySeconds = tonumber(config.TIMEOUT_TIMING) or 0
     config.TIMEOUT_TIMING = math.max(0, fallbackDelaySeconds)
 
     if not adapter or type(adapter.getPlatformDwellTimeMs) ~= "function" then
-        return
+        return nil
     end
 
     local melodySeconds, melodyPath, melodyError = departureMelodyDurationSeconds(resolver)
     if not melodySeconds then
         log.warn("Departure timing calculation skipped: " .. tostring(melodyError))
-        return
+        return nil
     end
 
     local departureConfig = type(config.announcement) == "table" and config.announcement.departure or nil
@@ -85,13 +85,13 @@ local function configureDepartureTiming(adapter, resolver)
     })
     if not ok then
         log.warn("Departure timing calculation skipped: " .. tostring(dwellTimeMs))
-        return
+        return nil
     end
 
     dwellTimeMs = tonumber(dwellTimeMs)
     if not dwellTimeMs or dwellTimeMs < 0 then
         log.warn("Departure timing calculation skipped: invalid MTR dwell time")
-        return
+        return nil
     end
 
     local dwellSeconds = dwellTimeMs / 1000
@@ -106,6 +106,8 @@ local function configureDepartureTiming(adapter, resolver)
         delaySeconds,
         melodyPath
     ))
+
+    return dwellTimeMs
 end
 
 -- function: Start and run the railway announcement application.
@@ -122,7 +124,7 @@ function app.run()
     local guidanceBell = GuidanceBell.new(config.guidanceBell, log)
 
     local adapter = loadAdapter()
-    configureDepartureTiming(adapter, resolver)
+    local departureDwellTimeMs = configureDepartureTiming(adapter, resolver)
 
     local cache = Cache.new(config.adapter.cacheTtlMs)
     local metadataProvider = MetadataProvider.new(adapter, cache, log)
@@ -138,6 +140,7 @@ function app.run()
         composer = composer,
         player = player,
         guidanceBell = guidanceBell,
+        departureDwellTimeMs = departureDwellTimeMs,
     })
 
     scheduler:run()
