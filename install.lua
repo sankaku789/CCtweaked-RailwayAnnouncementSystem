@@ -11,6 +11,7 @@ local RUNTIME_FILES = {
     "src/adapter/mtr.lua",
     "src/adapter/none.lua",
 
+    "src/audio/guidance_bell.lua",
     "src/audio/player.lua",
     "src/audio/segment.lua",
 
@@ -45,6 +46,7 @@ local REFRESHABLE_PATTERN_FILES = {
 
 local AUDIO_DIRECTORIES = {
     "audio/melody",
+    "audio/guidance",
     "audio/approach",
     "audio/departure",
     "audio/stopped",
@@ -221,7 +223,7 @@ local function migrateLegacyPatternFiles()
             else
                 ensureParent(target)
                 fs.move(source, target)
-                print(("Migrate -> %s -> %s"):format(mapping.source, mapping.target))
+                print(("Migrate -> %s -> %s"):format(mapping.source, targetPath(mapping.target)))
             end
         end
     end
