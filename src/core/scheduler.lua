@@ -12,6 +12,35 @@ local function now()
     return os.epoch("utc")
 end
 
+-- function: Return the audible timeline duration from the first audio item onward.
+local function playbackDurationSeconds(segments)
+    local duration = 0
+    local started = false
+
+    for _, item in ipairs(segments or {}) do
+        local path = nil
+
+        if type(item) == "string" then
+            path = item
+        elseif type(item) == "table" and item.kind == "audio" then
+            path = item.path
+        elseif type(item) == "table" and item.kind == "pause" and started then
+            duration = duration + math.max(0, tonumber(item.seconds) or 0)
+        end
+
+        if type(path) == "string" and path ~= "" and fs.exists(path) and not fs.isDir(path) then
+            started = true
+            duration = duration + (fs.getSize(path) / DFPWM_BYTES_PER_SECOND)
+        end
+    end
+
+    if not started then
+        return nil
+    end
+
+    return duration
+end
+
 -- function: Return the configured priority for an announcement type.
 local function priorityFor(config, typeName)
     local queue = config.queue or {}
@@ -444,6 +473,25 @@ end
 
 -- function: Complete guidance timing transitions after one request finishes.
 function Scheduler:_afterRequest(request, completed, hadSegments)
+    if request.type == "next_train" then
+        if not self.guidanceAvailable
+            or request.guidanceGeneration ~= self.guidanceGeneration
+            or not hadSegments
+        then
+            return
+        end
+
+        if self.trackState:get() == "PLATFORM" then
+            self.guidanceNextAt = nil
+            return
+        end
+
+        if not request.guidanceStartedAt or not completed then
+            self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds, "next_train fallback initial")
+        end
+        return
+    end
+
     if request.type ~= "guidance_bell" then
         return
     end
@@ -488,6 +536,12 @@ function Scheduler:processQueue()
         local hadSegments = #segments > 0
         local completed = true
 
+        if hadSegments and request.type == "next_train" and self.guidanceAvailable then
+            self:_resetGuidanceCycle()
+            request.guidanceGeneration = self.guidanceGeneration
+            request.guidanceDurationSeconds = playbackDurationSeconds(segments)
+        end
+
         if not hadSegments then
             if self.logger and request.type ~= "guidance_bell" then
                 self.logger.warn("Announcement has no playable segments: " .. tostring(request.type))
@@ -516,6 +570,22 @@ function Scheduler:processQueue()
                         startedAt,
                         self.guidanceDurationSeconds + self.guidanceConfig.intervalSeconds,
                         "bell duration+interval"
+                    )
+                end
+            elseif request.type == "next_train"
+                and self.guidanceAvailable
+                and request.guidanceDurationSeconds
+            then
+                onAudioStarted = function(startedAt)
+                    if request.guidanceGeneration ~= self.guidanceGeneration then
+                        return
+                    end
+
+                    request.guidanceStartedAt = startedAt
+                    self:_scheduleGuidanceFrom(
+                        startedAt,
+                        request.guidanceDurationSeconds + self.guidanceConfig.initialDelaySeconds,
+                        "next_train duration+initial"
                     )
                 end
             end
