@@ -15,6 +15,7 @@ return {
         bundled = {
             side = "top",
             syncDelaySeconds = 0.05,
+            releaseDelaySeconds = 0.15,
             signals = {
                 approach = colors.red,
                 departure = colors.blue,
