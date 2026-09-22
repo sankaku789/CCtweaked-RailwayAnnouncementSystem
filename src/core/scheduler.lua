@@ -34,7 +34,6 @@ function Scheduler.new(options)
     options.guidanceAvailable = false
     options.guidanceQueued = false
     options.guidanceNextAt = nil
-    options.guidanceWaitingForDeparture = false
     options.guidanceGeneration = 0
 
     return setmetatable(options, Scheduler)
@@ -106,7 +105,7 @@ function Scheduler:_scheduleGuidance(delaySeconds, reason)
     self:_scheduleGuidanceFrom(now(), delaySeconds, reason)
 end
 
--- function: Remove queued guidance work and invalidate older guidance playback callbacks.
+-- function: Remove queued guidance work and invalidate an older guidance cycle.
 function Scheduler:_resetGuidanceCycle()
     self.guidanceGeneration = self.guidanceGeneration + 1
     self.guidanceNextAt = nil
@@ -146,7 +145,6 @@ end
 function Scheduler:_guidanceDue()
     return self.guidanceAvailable
         and self.trackState:get() ~= "PLATFORM"
-        and not self.guidanceWaitingForDeparture
         and not self.guidanceQueued
         and self.currentRequestType == nil
         and self.queue:size() == 0
@@ -259,7 +257,6 @@ end
 -- function: Handle an APPROACH pulse and enable the PLATFORM periodic announcement mode.
 function Scheduler:_handleApproach()
     self.trackState:set("PLATFORM")
-    self.guidanceWaitingForDeparture = false
     self:_resetGuidanceCycle()
 
     if self.logger then
@@ -272,20 +269,31 @@ end
 
 -- function: Handle a DEPARTURE pulse and enable the IDLE periodic announcement mode.
 function Scheduler:_handleDeparture()
+    local departureAt = now()
     self.trackState:set("IDLE")
 
     if self.guidanceAvailable then
         self:_resetGuidanceCycle()
-        self.guidanceWaitingForDeparture = true
     end
 
     if self.logger then
-        self.logger.event("State", "IDLE (departure)")
+        self.logger.event("State", ("IDLE (departure) epoch=%d"):format(departureAt))
     end
 
     self:_handleStateChange()
     self:_invalidateMetadata()
     self:_enqueue("departure")
+
+    -- initialDelaySeconds is measured from the DEPARTURE event itself. If the
+    -- departure announcement is still using Player when the deadline arrives,
+    -- _guidanceDue keeps the bell waiting until normal playback has finished.
+    if self.guidanceAvailable then
+        self:_scheduleGuidanceFrom(
+            departureAt,
+            self.guidanceConfig.initialDelaySeconds,
+            "departure initial"
+        )
+    end
 end
 
 -- function: Handle a PASSING pulse without changing the periodic announcement mode.
@@ -300,7 +308,6 @@ end
 -- function: Handle the direct reset button and enable the IDLE periodic announcement mode.
 function Scheduler:_handleReset()
     self.trackState:set("IDLE")
-    self.guidanceWaitingForDeparture = false
     self:_invalidateMetadata()
 
     local priority = self:_preemptPriority()
@@ -412,7 +419,6 @@ function Scheduler:_composeRequest(request, metadata)
     if request.type == "guidance_bell" then
         if not self.guidanceAvailable
             or self.trackState:get() == "PLATFORM"
-            or self.guidanceWaitingForDeparture
             or request.guidanceGeneration ~= self.guidanceGeneration
         then
             return {}, {}
@@ -426,21 +432,6 @@ end
 
 -- function: Complete guidance timing transitions after one request finishes.
 function Scheduler:_afterRequest(request, completed, hadSegments)
-    if request.type == "departure" then
-        if self.guidanceWaitingForDeparture then
-            self.guidanceWaitingForDeparture = false
-            self.guidanceNextAt = nil
-
-            if self.guidanceAvailable and self.trackState:get() ~= "PLATFORM" then
-                self:_scheduleGuidance(
-                    self.guidanceConfig.initialDelaySeconds,
-                    "departure initial"
-                )
-            end
-        end
-        return
-    end
-
     if request.type ~= "guidance_bell" then
         return
     end
@@ -453,16 +444,14 @@ function Scheduler:_afterRequest(request, completed, hadSegments)
         return
     end
 
-    if self.trackState:get() == "PLATFORM" or self.guidanceWaitingForDeparture then
+    if self.trackState:get() == "PLATFORM" then
         self.guidanceNextAt = nil
         return
     end
 
-    -- Normally interval is scheduled from the actual first PCM submission callback.
-    -- If playback produced no audio-start callback, schedule a retry from here.
-    if not request.guidanceStarted then
-        self:_scheduleGuidance(self.guidanceConfig.intervalSeconds, "bell retry")
-    end
+    -- intervalSeconds is the quiet gap after the bell has finished. Therefore
+    -- start-to-start time is actual bell playback duration + intervalSeconds.
+    self:_scheduleGuidance(self.guidanceConfig.intervalSeconds, "bell interval")
 end
 
 -- function: Process queued announcements sequentially with priority-aware interruption.
@@ -503,23 +492,7 @@ function Scheduler:processQueue()
                 ))
             end
 
-            local onAudioStarted = nil
-            if request.type == "guidance_bell" then
-                onAudioStarted = function(startedAt)
-                    if request.guidanceGeneration ~= self.guidanceGeneration then
-                        return
-                    end
-
-                    request.guidanceStarted = true
-                    self:_scheduleGuidanceFrom(
-                        startedAt,
-                        self.guidanceConfig.intervalSeconds,
-                        "bell interval"
-                    )
-                end
-            end
-
-            completed = self.player:playSegments(segments, request.priority, onAudioStarted)
+            completed = self.player:playSegments(segments, request.priority)
 
             if not completed and self.logger and request.type ~= "guidance_bell" then
                 self.logger.info("Announcement interrupted: " .. tostring(request.type))
