@@ -2,6 +2,7 @@ local Scheduler = {}
 Scheduler.__index = Scheduler
 
 local GUIDANCE_CHECK_SECONDS = 0.05
+local DFPWM_BYTES_PER_SECOND = 6000
 local DEFAULT_GUIDANCE_PATH = "audio/guidance/bell.dfpwm"
 local DEFAULT_GUIDANCE_INTERVAL_SECONDS = 10
 local DEFAULT_GUIDANCE_PRIORITY = -1
@@ -35,6 +36,7 @@ function Scheduler.new(options)
     options.guidanceQueued = false
     options.guidanceNextAt = nil
     options.guidanceGeneration = 0
+    options.guidanceDurationSeconds = nil
 
     return setmetatable(options, Scheduler)
 end
@@ -128,13 +130,15 @@ function Scheduler:_initializeGuidance()
         return
     end
 
+    self.guidanceDurationSeconds = fs.getSize(self.guidanceConfig.path) / DFPWM_BYTES_PER_SECOND
     self.guidanceAvailable = true
     self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds, "startup initial")
 
     if self.logger then
-        self.logger.info(("Guidance bell enabled: initialDelay=%.3fs interval=%.3fs priority=%s file=%s"):format(
+        self.logger.info(("Guidance bell enabled: initialDelay=%.3fs interval=%.3fs duration=%.3fs priority=%s file=%s"):format(
             self.guidanceConfig.initialDelaySeconds,
             self.guidanceConfig.intervalSeconds,
+            self.guidanceDurationSeconds,
             tostring(self.guidanceConfig.priority),
             self.guidanceConfig.path
         ))
@@ -457,9 +461,9 @@ function Scheduler:_afterRequest(request, completed, hadSegments)
         return
     end
 
-    -- intervalSeconds is the quiet gap after the bell has finished. Therefore
-    -- start-to-start time is actual bell playback duration + intervalSeconds.
-    self:_scheduleGuidance(self.guidanceConfig.intervalSeconds, "bell interval")
+    if not request.guidanceStartedAt or not completed then
+        self:_scheduleGuidance(self.guidanceConfig.intervalSeconds, "bell fallback interval")
+    end
 end
 
 -- function: Process queued announcements sequentially with priority-aware interruption.
@@ -500,7 +504,23 @@ function Scheduler:processQueue()
                 ))
             end
 
-            completed = self.player:playSegments(segments, request.priority)
+            local onAudioStarted = nil
+            if request.type == "guidance_bell" then
+                onAudioStarted = function(startedAt)
+                    if request.guidanceGeneration ~= self.guidanceGeneration then
+                        return
+                    end
+
+                    request.guidanceStartedAt = startedAt
+                    self:_scheduleGuidanceFrom(
+                        startedAt,
+                        self.guidanceDurationSeconds + self.guidanceConfig.intervalSeconds,
+                        "bell duration+interval"
+                    )
+                end
+            end
+
+            completed = self.player:playSegments(segments, request.priority, onAudioStarted)
 
             if not completed and self.logger and request.type ~= "guidance_bell" then
                 self.logger.info("Announcement interrupted: " .. tostring(request.type))
