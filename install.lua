@@ -223,7 +223,7 @@ local function migrateLegacyPatternFiles()
             else
                 ensureParent(target)
                 fs.move(source, target)
-                print(("Migrate -> %s -> %s"):format(mapping.source, targetPath(mapping.target)))
+                print(("Migrate -> %s -> %s"):format(mapping.source, mapping.target))
             end
         end
     end
