@@ -36,8 +36,8 @@ return {
     guidanceBell = {
         enabled = true,
         path = "audio/guidance/bell.dfpwm",
-        initialDelaySeconds = 0.8,
-        intervalSeconds = 7,
+        initialDelaySeconds = 7,
+        intervalSeconds = 0.8,
         -- Keep below every normal announcement priority.
         priority = -1,
     },
