@@ -73,7 +73,7 @@ function Scheduler:_scheduleGuidanceBell(delaySeconds)
     self.guidanceNextAt = now() + (math.max(0, delaySeconds) * 1000)
 end
 
--- function: Schedule the first guidance bell after startup or a PLATFORM to IDLE transition.
+-- function: Schedule the first guidance bell after startup or completed departure playback.
 function Scheduler:_scheduleGuidanceBellInitialDelay()
     local delaySeconds = self.guidanceBell and self.guidanceBell.initialDelaySeconds or 0
     self:_scheduleGuidanceBell(delaySeconds)
@@ -245,7 +245,8 @@ function Scheduler:_handleDeparture()
     if previousState == "PLATFORM" and self:_guidanceBellEnabled() then
         self.guidanceResumeAfterDeparture = true
         self.guidanceQueued = false
-        self:_scheduleGuidanceBellInitialDelay()
+        self.guidanceNextAt = nil
+        self.queue:removeTypes({ guidance_bell = true })
     end
 
     if self.logger then
@@ -396,6 +397,7 @@ end
 function Scheduler:_afterPlayback(request)
     if request.type == "departure" and self.guidanceResumeAfterDeparture then
         self.guidanceResumeAfterDeparture = false
+        self:_scheduleGuidanceBellInitialDelay()
         return
     end
 
