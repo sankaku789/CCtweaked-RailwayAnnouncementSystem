@@ -437,6 +437,13 @@ function Scheduler:processQueue()
         local request = self.queue:waitPop()
         self.currentRequestType = request.type
 
+        -- A normal announcement may enqueue while the bell owns Player. Wait until
+        -- the bell has handled its interrupt and completed Player/speaker cleanup
+        -- before starting the normal request on the same Player instance.
+        while self.guidancePlaying do
+            sleep(0)
+        end
+
         if request.type == "departure" then
             local delaySeconds = tonumber(self.config.TIMEOUT_TIMING) or 0
             if delaySeconds > 0 then
