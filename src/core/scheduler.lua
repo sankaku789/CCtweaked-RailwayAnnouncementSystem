@@ -1,6 +1,8 @@
 local Scheduler = {}
 Scheduler.__index = Scheduler
 
+local GUIDANCE_CHECK_SECONDS = 0.05
+
 -- function: Return the current UTC epoch time in milliseconds.
 local function now()
     return os.epoch("utc")
@@ -24,7 +26,9 @@ end
 function Scheduler.new(options)
     options.periodicNextAt = {}
     options.guidancePlaying = false
-    options.guidanceResumeAt = nil
+    options.guidanceAvailable = false
+    options.guidanceNextAt = nil
+    options.guidanceResumeAfterDeparture = false
     return setmetatable(options, Scheduler)
 end
 
@@ -34,23 +38,76 @@ function Scheduler:_preemptPriority()
     return tonumber(queue.preemptPriority) or 100
 end
 
--- function: Return whether guidance bell playback is allowed for the current track state.
-function Scheduler:_guidanceBellAllowed()
-    if self.trackState:get() == "PLATFORM" then
-        return false
-    end
-
-    return self.guidanceResumeAt == nil or now() >= self.guidanceResumeAt
+-- function: Return whether the guidance bell is configured to run.
+function Scheduler:_guidanceBellEnabled()
+    return self.guidanceBell ~= nil and self.guidanceBell.enabled == true
 end
 
--- function: Apply the guidance bell initial delay when leaving PLATFORM for IDLE.
-function Scheduler:_resetGuidanceBellResumeDelay(previousState)
-    if previousState ~= "PLATFORM" or not self.guidanceBell then
+-- function: Return whether guidance bell audio may play in the current state.
+function Scheduler:_guidanceBellPlaybackAllowed()
+    return self.guidanceAvailable
+        and self.trackState:get() ~= "PLATFORM"
+        and not self.guidanceResumeAfterDeparture
+end
+
+-- function: Return whether the next guidance bell playback is due.
+function Scheduler:_guidanceBellDue()
+    return self:_guidanceBellPlaybackAllowed()
+        and self.guidanceNextAt ~= nil
+        and now() >= self.guidanceNextAt
+end
+
+-- function: Schedule the next guidance bell after the given delay.
+function Scheduler:_scheduleGuidanceBell(delaySeconds)
+    if not self:_guidanceBellPlaybackAllowed() then
+        self.guidanceNextAt = nil
         return
     end
 
-    local delaySeconds = tonumber(self.guidanceBell.initialDelaySeconds) or 0
-    self.guidanceResumeAt = now() + (math.max(0, delaySeconds) * 1000)
+    delaySeconds = tonumber(delaySeconds) or 0
+    self.guidanceNextAt = now() + (math.max(0, delaySeconds) * 1000)
+end
+
+-- function: Schedule the first guidance bell after startup or a PLATFORM to IDLE transition.
+function Scheduler:_scheduleGuidanceBellInitialDelay()
+    local delaySeconds = self.guidanceBell and self.guidanceBell.initialDelaySeconds or 0
+    self:_scheduleGuidanceBell(delaySeconds)
+end
+
+-- function: Schedule the next guidance bell from the end of the previous playback.
+function Scheduler:_scheduleGuidanceBellInterval()
+    local delaySeconds = self.guidanceBell and self.guidanceBell.intervalSeconds or 0
+    self:_scheduleGuidanceBell(delaySeconds)
+end
+
+-- function: Validate and initialize the guidance bell playback schedule.
+function Scheduler:_initializeGuidanceBell()
+    if not self:_guidanceBellEnabled() then
+        return
+    end
+
+    local segments, diagnostics = self.guidanceBell:compose()
+    if #segments == 0 then
+        if self.logger then
+            self.logger.warn("Guidance bell disabled because audio is unavailable.")
+            for _, diagnostic in ipairs(diagnostics or {}) do
+                self.logger.warn("  - " .. tostring(diagnostic))
+            end
+        end
+        return
+    end
+
+    self.guidanceAvailable = true
+
+    if self.logger then
+        self.logger.info(("Guidance bell enabled: initialDelay=%.3fs interval=%.3fs priority=%s"):format(
+            tonumber(self.guidanceBell.initialDelaySeconds) or 0,
+            tonumber(self.guidanceBell.intervalSeconds) or 0,
+            tostring(self.guidanceBell.priority)
+        ))
+    end
+
+    self:_scheduleGuidanceBellInitialDelay()
 end
 
 -- function: Remove queued periodic announcement requests.
@@ -135,8 +192,13 @@ function Scheduler:_enqueue(typeName, priorityOverride)
         return false
     end
 
-    if typeName ~= "guidance_bell" and self.guidancePlaying then
-        self.player:interruptBelow(priority)
+    if typeName ~= "guidance_bell" then
+        self.queue:removeTypes({ guidance_bell = true })
+        self.guidanceNextAt = nil
+
+        if self.guidancePlaying then
+            self.player:interruptBelow(priority)
+        end
     end
 
     if priority >= self:_preemptPriority() then
@@ -149,7 +211,9 @@ end
 
 -- function: Handle an APPROACH pulse and enable the PLATFORM periodic announcement mode.
 function Scheduler:_handleApproach()
-    self.guidanceResumeAt = nil
+    self.guidanceNextAt = nil
+    self.guidanceResumeAfterDeparture = false
+    self.queue:removeTypes({ guidance_bell = true })
     self.trackState:set("PLATFORM")
 
     if self.logger then
@@ -164,7 +228,11 @@ end
 function Scheduler:_handleDeparture()
     local previousState = self.trackState:get()
     self.trackState:set("IDLE")
-    self:_resetGuidanceBellResumeDelay(previousState)
+
+    if previousState == "PLATFORM" and self:_guidanceBellEnabled() then
+        self.guidanceResumeAfterDeparture = true
+        self.guidanceNextAt = nil
+    end
 
     if self.logger then
         self.logger.event("State", "IDLE (departure)")
@@ -188,13 +256,19 @@ end
 function Scheduler:_handleReset()
     local previousState = self.trackState:get()
     self.trackState:set("IDLE")
-    self:_resetGuidanceBellResumeDelay(previousState)
+    self.guidanceResumeAfterDeparture = false
     self:_invalidateMetadata()
 
     local priority = self:_preemptPriority()
     self.queue:removeBelow(priority)
     self.player:interruptBelow(priority)
     self:_handleStateChange()
+
+    if previousState == "PLATFORM" then
+        self:_scheduleGuidanceBellInitialDelay()
+    else
+        self:_scheduleGuidanceBellInterval()
+    end
 
     if self.logger then
         self.logger.event("State", "IDLE (manual reset)")
@@ -263,17 +337,22 @@ function Scheduler:monitorPeriodic()
     end
 end
 
--- function: Run the independent guidance bell scheduler when configured.
+-- function: Queue the guidance bell only when its playback-completion-based timer expires.
 function Scheduler:monitorGuidanceBell()
-    if not self.guidanceBell then
+    if not self.guidanceAvailable then
         return
     end
 
-    self.guidanceBell:run(function(typeName, priority)
-        if self:_guidanceBellAllowed() then
-            self:_enqueue(typeName, priority)
+    while true do
+        if self:_guidanceBellDue() then
+            local queued = self:_enqueue("guidance_bell", self.guidanceBell.priority)
+            if queued then
+                self.guidanceNextAt = nil
+            end
         end
-    end)
+
+        sleep(GUIDANCE_CHECK_SECONDS)
+    end
 end
 
 -- function: Return metadata only for announcement types that require train information.
@@ -291,7 +370,7 @@ end
 -- function: Resolve playback items for one queued request.
 function Scheduler:_composeRequest(request, metadata)
     if request.type == "guidance_bell" and self.guidanceBell then
-        if not self:_guidanceBellAllowed() then
+        if not self:_guidanceBellPlaybackAllowed() then
             return {}, {}
         end
 
@@ -299,6 +378,21 @@ function Scheduler:_composeRequest(request, metadata)
     end
 
     return self.composer:compose(request, metadata)
+end
+
+-- function: Schedule guidance bell playback after one processed announcement request.
+function Scheduler:_afterPlayback(request)
+    if not self.guidanceAvailable then
+        return
+    end
+
+    if request.type == "departure" and self.guidanceResumeAfterDeparture then
+        self.guidanceResumeAfterDeparture = false
+        self:_scheduleGuidanceBellInitialDelay()
+        return
+    end
+
+    self:_scheduleGuidanceBellInterval()
 end
 
 -- function: Process queued announcements sequentially with priority-aware interruption.
@@ -340,12 +434,15 @@ function Scheduler:processQueue()
                 self.logger.info("Announcement interrupted: " .. tostring(request.type))
             end
         end
+
+        self:_afterPlayback(request)
     end
 end
 
 -- function: Run input, periodic scheduling, guidance bell scheduling, and queue processing tasks in parallel.
 function Scheduler:run()
     self:_resetPeriodicTimers()
+    self:_initializeGuidanceBell()
 
     parallel.waitForAll(
         -- function: Run the railway input monitoring task.
