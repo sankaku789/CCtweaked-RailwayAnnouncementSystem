@@ -12,6 +12,7 @@ local Queue = require("core.announcement_queue")
 local Segment = require("audio.segment")
 local Composer = require("core.composer")
 local Player = require("audio.player")
+local GuidanceBell = require("audio.guidance_bell")
 local Cache = require("metadata.cache")
 local MetadataProvider = require("metadata.provider")
 local Scheduler = require("core.scheduler")
@@ -118,6 +119,7 @@ function app.run()
     local resolver = Segment.new(config, segmentDefinitions)
     local composer = Composer.new(announcementPatterns, resolver, announcementComposites, routeOptions)
     local player = Player.new(speakers, log)
+    local guidanceBell = GuidanceBell.new(config.guidanceBell, log)
 
     local adapter = loadAdapter()
     configureDepartureTiming(adapter, resolver)
@@ -135,6 +137,7 @@ function app.run()
         metadataProvider = metadataProvider,
         composer = composer,
         player = player,
+        guidanceBell = guidanceBell,
     })
 
     scheduler:run()
