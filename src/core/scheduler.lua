@@ -23,6 +23,7 @@ end
 -- function: Create a scheduler from the application components.
 function Scheduler.new(options)
     options.periodicNextAt = {}
+    options.guidancePlaying = false
     return setmetatable(options, Scheduler)
 end
 
@@ -86,8 +87,12 @@ function Scheduler:_invalidateMetadata()
 end
 
 -- function: Queue an announcement request with configured priority and expiry.
-function Scheduler:_enqueue(typeName)
-    local priority = priorityFor(self.config, typeName)
+function Scheduler:_enqueue(typeName, priorityOverride)
+    local priority = tonumber(priorityOverride)
+    if priority == nil then
+        priority = priorityFor(self.config, typeName)
+    end
+
     local ttl = ttlFor(self.config, typeName)
     local createdAt = now()
 
@@ -104,10 +109,14 @@ function Scheduler:_enqueue(typeName)
 
     local ok, reason = self.queue:enqueue(request)
     if not ok then
-        if self.logger then
+        if self.logger and not (typeName == "guidance_bell" and reason == "duplicate") then
             self.logger.warn(("Announcement skipped (%s): %s"):format(tostring(reason), typeName))
         end
         return false
+    end
+
+    if typeName ~= "guidance_bell" and self.guidancePlaying then
+        self.player:interruptBelow(priority)
     end
 
     if priority >= self:_preemptPriority() then
@@ -229,6 +238,17 @@ function Scheduler:monitorPeriodic()
     end
 end
 
+-- function: Run the independent guidance bell scheduler when configured.
+function Scheduler:monitorGuidanceBell()
+    if not self.guidanceBell then
+        return
+    end
+
+    self.guidanceBell:run(function(typeName, priority)
+        self:_enqueue(typeName, priority)
+    end)
+end
+
 -- function: Return metadata only for announcement types that require train information.
 function Scheduler:_metadataFor(request)
     if request.type == "approach"
@@ -239,6 +259,15 @@ function Scheduler:_metadataFor(request)
     end
 
     return nil
+end
+
+-- function: Resolve playback items for one queued request.
+function Scheduler:_composeRequest(request, metadata)
+    if request.type == "guidance_bell" and self.guidanceBell then
+        return self.guidanceBell:compose()
+    end
+
+    return self.composer:compose(request, metadata)
 end
 
 -- function: Process queued announcements sequentially with priority-aware interruption.
@@ -254,7 +283,7 @@ function Scheduler:processQueue()
         end
 
         local metadata = self:_metadataFor(request)
-        local segments, diagnostics = self.composer:compose(request, metadata)
+        local segments, diagnostics = self:_composeRequest(request, metadata)
 
         if #segments == 0 then
             if self.logger then
@@ -264,7 +293,7 @@ function Scheduler:processQueue()
                 end
             end
         else
-            if self.logger then
+            if self.logger and request.type ~= "guidance_bell" then
                 self.logger.info(("Playing %s announcement at priority %s (%d segment(s))."):format(
                     tostring(request.type),
                     tostring(request.priority),
@@ -272,15 +301,18 @@ function Scheduler:processQueue()
                 ))
             end
 
+            self.guidancePlaying = request.type == "guidance_bell"
             local completed = self.player:playSegments(segments, request.priority)
-            if not completed and self.logger then
+            self.guidancePlaying = false
+
+            if not completed and self.logger and request.type ~= "guidance_bell" then
                 self.logger.info("Announcement interrupted: " .. tostring(request.type))
             end
         end
     end
 end
 
--- function: Run input, periodic scheduling, and queue processing tasks in parallel.
+-- function: Run input, periodic scheduling, guidance bell scheduling, and queue processing tasks in parallel.
 function Scheduler:run()
     self:_resetPeriodicTimers()
 
@@ -292,6 +324,10 @@ function Scheduler:run()
         -- function: Run the periodic announcement scheduling task.
         function()
             self:monitorPeriodic()
+        end,
+        -- function: Run the guidance bell scheduling task.
+        function()
+            self:monitorGuidanceBell()
         end,
         -- function: Run the announcement queue processing task.
         function()
