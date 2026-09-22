@@ -319,7 +319,7 @@ function MtrAdapter:_resolveStationIdHex()
     return matchedId
 end
 
--- function: Inspect how many route candidates match the configured station and platform name.
+-- function: Inspect distinct dwell timings for the configured station and platform name.
 function MtrAdapter:getPlatformDwellTiming(context)
     if self.platformIdHex ~= "" then
         local arrival = self:_requestArrival(context)
@@ -342,6 +342,7 @@ function MtrAdapter:getPlatformDwellTiming(context)
         error("MTR stations-and-routes response does not contain routes")
     end
 
+    local dwellCandidates = {}
     local candidateCount = 0
     local singleDwellTime = nil
 
@@ -357,7 +358,9 @@ function MtrAdapter:getPlatformDwellTiming(context)
                     and nameMatches(station.name, platformName)
                     and candidate
                     and candidate >= 0
+                    and dwellCandidates[candidate] == nil
                 then
+                    dwellCandidates[candidate] = true
                     candidateCount = candidateCount + 1
                     if candidateCount == 1 then
                         singleDwellTime = candidate
