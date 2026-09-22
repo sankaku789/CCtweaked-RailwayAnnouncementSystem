@@ -58,63 +58,89 @@ local function departureMelodyDurationSeconds(resolver)
     return fs.getSize(path) / DFPWM_BYTES_PER_SECOND, path, nil
 end
 
--- function: Read the MTR dwell time for this platform.
-local function platformDwellTimeMs(adapter)
-    if not adapter or type(adapter.getPlatformDwellTimeMs) ~= "function" then
-        return nil
-    end
-
-    local ok, dwellTimeMs = pcall(adapter.getPlatformDwellTimeMs, adapter, {
-        track = config.trackNumber,
-    })
-    if not ok then
-        log.warn("MTR dwell time unavailable: " .. tostring(dwellTimeMs))
-        return nil
-    end
-
-    dwellTimeMs = tonumber(dwellTimeMs)
-    if not dwellTimeMs or dwellTimeMs < 0 then
-        log.warn("MTR dwell time unavailable: invalid dwell time")
-        return nil
-    end
-
-    return dwellTimeMs
-end
-
--- function: Calculate the internal departure delay from a known MTR dwell time.
-local function configureDepartureTiming(dwellTimeMs, resolver)
-    local fallbackDelaySeconds = tonumber(config.TIMEOUT_TIMING) or 0
-    config.TIMEOUT_TIMING = math.max(0, fallbackDelaySeconds)
-
-    if dwellTimeMs == nil then
-        return
-    end
-
-    local melodySeconds, melodyPath, melodyError = departureMelodyDurationSeconds(resolver)
-    if not melodySeconds then
-        log.warn("Departure timing calculation skipped: " .. tostring(melodyError))
-        return
-    end
-
+-- function: Return the configured gap between melody end and scheduled departure.
+local function departureMelodyEndLeadSeconds()
     local departureConfig = type(config.announcement) == "table" and config.announcement.departure or nil
     local leadSeconds = type(departureConfig) == "table" and tonumber(departureConfig.melodyEndLeadSeconds) or nil
+
     if leadSeconds == nil then
         leadSeconds = DEFAULT_DEPARTURE_MELODY_END_LEAD_SECONDS
     end
-    leadSeconds = math.max(0, leadSeconds)
 
-    local dwellSeconds = dwellTimeMs / 1000
-    local delaySeconds = math.max(0, dwellSeconds - melodySeconds - leadSeconds)
-    config.TIMEOUT_TIMING = delaySeconds
+    return math.max(0, leadSeconds)
+end
 
-    log.event("Departure timing", ("track=%s dwell=%.3fs melody=%.3fs lead=%.3fs delay=%.3fs file=%s"):format(
-        tostring(config.trackNumber),
-        dwellSeconds,
-        melodySeconds,
-        leadSeconds,
-        delaySeconds,
-        melodyPath
-    ))
+-- function: Build the startup departure timing profile.
+local function buildDepartureTiming(adapter, resolver)
+    local fallbackDelaySeconds = math.max(0, tonumber(config.TIMEOUT_TIMING) or 0)
+    local melodySeconds, melodyPath, melodyError = departureMelodyDurationSeconds(resolver)
+    local leadSeconds = departureMelodyEndLeadSeconds()
+
+    local timing = {
+        dynamic = false,
+        candidateCount = nil,
+        dwellTimeMs = nil,
+        melodySeconds = melodySeconds,
+        melodyPath = melodyPath,
+        leadSeconds = leadSeconds,
+        fallbackDelaySeconds = fallbackDelaySeconds,
+        staticDelaySeconds = fallbackDelaySeconds,
+    }
+
+    if not melodySeconds then
+        log.warn("Departure timing melody unavailable: " .. tostring(melodyError))
+    end
+
+    if not adapter then
+        return timing
+    end
+
+    if type(adapter.getPlatformDwellTiming) == "function" then
+        local ok, profile = pcall(adapter.getPlatformDwellTiming, adapter, {
+            track = config.trackNumber,
+        })
+
+        if not ok then
+            log.warn("MTR departure timing unavailable: " .. tostring(profile))
+            return timing
+        end
+
+        if type(profile) == "table" then
+            timing.dynamic = profile.dynamic == true
+            timing.candidateCount = tonumber(profile.candidateCount)
+            timing.dwellTimeMs = tonumber(profile.dwellTimeMs)
+        end
+    elseif type(adapter.getPlatformDwellTimeMs) == "function" then
+        local ok, dwellTimeMs = pcall(adapter.getPlatformDwellTimeMs, adapter, {
+            track = config.trackNumber,
+        })
+
+        if not ok then
+            log.warn("MTR departure timing unavailable: " .. tostring(dwellTimeMs))
+            return timing
+        end
+
+        timing.dwellTimeMs = tonumber(dwellTimeMs)
+    end
+
+    if timing.dynamic then
+        log.event("Departure timing", ("dynamic candidates=%s"):format(
+            timing.candidateCount and tostring(timing.candidateCount) or "?"
+        ))
+        return timing
+    end
+
+    if timing.dwellTimeMs and timing.dwellTimeMs >= 0 and melodySeconds then
+        local dwellSeconds = timing.dwellTimeMs / 1000
+        timing.staticDelaySeconds = math.max(0, dwellSeconds - melodySeconds - leadSeconds)
+
+        log.event("Departure timing", ("static dwell=%.1fs delay=%.1fs"):format(
+            dwellSeconds,
+            timing.staticDelaySeconds
+        ))
+    end
+
+    return timing
 end
 
 -- function: Start and run the railway announcement application.
@@ -131,8 +157,7 @@ function app.run()
     local guidanceBell = GuidanceBell.new(config.guidanceBell, log)
 
     local adapter = loadAdapter()
-    local departureDwellTimeMs = platformDwellTimeMs(adapter)
-    configureDepartureTiming(departureDwellTimeMs, resolver)
+    local departureTiming = buildDepartureTiming(adapter, resolver)
 
     local cache = Cache.new(config.adapter.cacheTtlMs)
     local metadataProvider = MetadataProvider.new(adapter, cache, log)
@@ -148,7 +173,8 @@ function app.run()
         composer = composer,
         player = player,
         guidanceBell = guidanceBell,
-        departureDwellTimeMs = departureDwellTimeMs,
+        departureTiming = departureTiming,
+        departureTimingAdapter = adapter,
     })
 
     scheduler:run()
