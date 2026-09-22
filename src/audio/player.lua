@@ -5,6 +5,7 @@ Player.__index = Player
 
 local DFPWM_READ_SIZE = 4 * 1024
 local PCM_CHUNK_SIZE = 128 * 1024
+local PLAYBACK_COMPLETION_BARRIER = { 0 }
 local INTERRUPT_EVENT = "railway_player_interrupt"
 
 -- function: Check whether a playback item is an explicit pause directive.
@@ -123,8 +124,12 @@ function Player:_playAudioRun(paths)
     end
 
     if submittedAudio then
-        local ready = self.speakers:waitUntilAllReady(INTERRUPT_EVENT)
-        if not ready or self.interruptRequested then
+        -- A speaker buffers only one playAudio call at a time. This silent one-sample
+        -- barrier cannot be accepted until the final real audio buffer has finished.
+        -- playChunk retries after speaker_audio_empty events, so stale events cannot
+        -- make this completion boundary fire early.
+        local accepted = self.speakers:playChunk(PLAYBACK_COMPLETION_BARRIER, INTERRUPT_EVENT)
+        if not accepted or self.interruptRequested then
             return false, "interrupted"
         end
     end
