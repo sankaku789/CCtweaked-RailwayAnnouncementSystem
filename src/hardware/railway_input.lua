@@ -38,6 +38,12 @@ function RailwayInput.new(options)
     end
     assert(syncDelaySeconds >= 0, "input.bundled.syncDelaySeconds must be non-negative")
 
+    local releaseDelaySeconds = tonumber(bundled.releaseDelaySeconds)
+    if releaseDelaySeconds == nil then
+        releaseDelaySeconds = 0.15
+    end
+    assert(releaseDelaySeconds >= 0, "input.bundled.releaseDelaySeconds must be non-negative")
+
     if reset.side ~= nil then
         assert(type(reset.side) == "string", "input.reset.side must be a string")
     end
@@ -47,6 +53,7 @@ function RailwayInput.new(options)
         approachColor = signals.approach,
         departureColor = signals.departure,
         syncDelaySeconds = syncDelaySeconds,
+        releaseDelaySeconds = releaseDelaySeconds,
         resetSide = reset.side,
         lastReset = reset.side and redstone.getInput(reset.side) or false,
         armed = true,
@@ -65,6 +72,43 @@ function RailwayInput:_readResetRising()
     local rising = current and not self.lastReset
     self.lastReset = current
     return rising
+end
+
+-- function: Wait for both bundled pulse lines to remain idle before re-arming detection.
+function RailwayInput:_waitForStableIdle()
+    if self.releaseDelaySeconds <= 0 then
+        self.armed = true
+        return nil
+    end
+
+    local timerId = os.startTimer(self.releaseDelaySeconds)
+
+    while true do
+        local event, value = os.pullEvent()
+
+        if event == "redstone" then
+            if self:_readResetRising() then
+                if type(os.cancelTimer) == "function" then
+                    os.cancelTimer(timerId)
+                end
+                return "reset"
+            end
+
+            local approach, departure = self:_readLines()
+            if approach or departure then
+                if type(os.cancelTimer) == "function" then
+                    os.cancelTimer(timerId)
+                end
+                return nil
+            end
+        elseif event == "timer" and value == timerId then
+            local approach, departure = self:_readLines()
+            if not approach and not departure then
+                self.armed = true
+            end
+            return nil
+        end
+    end
 end
 
 -- function: Accumulate pulse-line bits during the synchronization window.
@@ -106,19 +150,22 @@ function RailwayInput:_collectPulse(approachSeen, departureSeen)
     end
 end
 
--- function: Sample one logical input event and re-arm bundled pulse detection after idle.
+-- function: Sample one logical input event and re-arm bundled pulse detection after stable idle.
 function RailwayInput:_sample()
     if self:_readResetRising() then
         return "reset"
     end
 
     local approach, departure = self:_readLines()
-    if not approach and not departure then
-        self.armed = true
+
+    if not self.armed then
+        if not approach and not departure then
+            return self:_waitForStableIdle()
+        end
         return nil
     end
 
-    if not self.armed then
+    if not approach and not departure then
         return nil
     end
 
