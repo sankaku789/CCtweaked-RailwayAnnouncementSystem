@@ -37,7 +37,7 @@ return {
         enabled = true,
         path = "audio/guidance/bell.dfpwm",
         initialDelaySeconds = 7,
-        intervalSeconds = 0.8,
+        intervalSeconds = 1,
         -- Keep below every normal announcement priority.
         priority = -1,
     },
@@ -73,7 +73,7 @@ return {
         departure = {
             doorsClosingEnabled = false,
             -- Seconds to leave between the end of the melody and scheduled departure.
-            melodyEndLeadSeconds = 3,
+            melodyEndLeadSeconds = 5,
         },
     },
 
