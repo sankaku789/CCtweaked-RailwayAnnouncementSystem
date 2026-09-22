@@ -53,13 +53,14 @@ end
 -- function: Return whether the next guidance bell playback is due.
 function Scheduler:_guidanceBellDue()
     return self:_guidanceBellPlaybackAllowed()
+        and not self.guidancePlaying
         and self.guidanceNextAt ~= nil
         and now() >= self.guidanceNextAt
 end
 
 -- function: Schedule the next guidance bell after the given delay.
 function Scheduler:_scheduleGuidanceBell(delaySeconds)
-    if not self:_guidanceBellPlaybackAllowed() then
+    if not self.guidanceAvailable then
         self.guidanceNextAt = nil
         return
     end
@@ -74,7 +75,7 @@ function Scheduler:_scheduleGuidanceBellInitialDelay()
     self:_scheduleGuidanceBell(delaySeconds)
 end
 
--- function: Schedule the next guidance bell from the end of the previous playback.
+-- function: Schedule the next guidance bell from the start of the previous playback.
 function Scheduler:_scheduleGuidanceBellInterval()
     local delaySeconds = self.guidanceBell and self.guidanceBell.intervalSeconds or 0
     self:_scheduleGuidanceBell(delaySeconds)
@@ -194,7 +195,6 @@ function Scheduler:_enqueue(typeName, priorityOverride)
 
     if typeName ~= "guidance_bell" then
         self.queue:removeTypes({ guidance_bell = true })
-        self.guidanceNextAt = nil
 
         if self.guidancePlaying then
             self.player:interruptBelow(priority)
@@ -231,7 +231,7 @@ function Scheduler:_handleDeparture()
 
     if previousState == "PLATFORM" and self:_guidanceBellEnabled() then
         self.guidanceResumeAfterDeparture = true
-        self.guidanceNextAt = nil
+        self:_scheduleGuidanceBellInitialDelay()
     end
 
     if self.logger then
@@ -337,7 +337,7 @@ function Scheduler:monitorPeriodic()
     end
 end
 
--- function: Queue the guidance bell only when its playback-completion-based timer expires.
+-- function: Queue the guidance bell when its configured absolute deadline expires.
 function Scheduler:monitorGuidanceBell()
     if not self.guidanceAvailable then
         return
@@ -345,10 +345,7 @@ function Scheduler:monitorGuidanceBell()
 
     while true do
         if self:_guidanceBellDue() then
-            local queued = self:_enqueue("guidance_bell", self.guidanceBell.priority)
-            if queued then
-                self.guidanceNextAt = nil
-            end
+            self:_enqueue("guidance_bell", self.guidanceBell.priority)
         end
 
         sleep(GUIDANCE_CHECK_SECONDS)
@@ -380,19 +377,11 @@ function Scheduler:_composeRequest(request, metadata)
     return self.composer:compose(request, metadata)
 end
 
--- function: Schedule guidance bell playback after one processed announcement request.
+-- function: Resume guidance bell playback after a departure announcement without shifting its deadline.
 function Scheduler:_afterPlayback(request)
-    if not self.guidanceAvailable then
-        return
-    end
-
     if request.type == "departure" and self.guidanceResumeAfterDeparture then
         self.guidanceResumeAfterDeparture = false
-        self:_scheduleGuidanceBellInitialDelay()
-        return
     end
-
-    self:_scheduleGuidanceBellInterval()
 end
 
 -- function: Process queued announcements sequentially with priority-aware interruption.
@@ -427,6 +416,10 @@ function Scheduler:processQueue()
             end
 
             self.guidancePlaying = request.type == "guidance_bell"
+            if self.guidancePlaying then
+                self:_scheduleGuidanceBellInterval()
+            end
+
             local completed = self.player:playSegments(segments, request.priority)
             self.guidancePlaying = false
 
