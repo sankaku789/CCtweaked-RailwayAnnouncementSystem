@@ -32,6 +32,15 @@ return {
         reconnectDelay = 1,
     },
 
+    guidanceBell = {
+        enabled = false,
+        path = "audio/guidance/bell.dfpwm",
+        initialDelaySeconds = 0,
+        intervalSeconds = 5,
+        -- Keep below every normal announcement priority.
+        priority = -1,
+    },
+
     adapter = {
         module = "mtr",
         cacheTtlMs = 30000,
