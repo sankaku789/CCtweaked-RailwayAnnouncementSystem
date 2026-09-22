@@ -35,7 +35,7 @@ return {
 
     destination_sentence = {
         resolver = "destination",
-        directory = "audio/destination/station",
+        directory = "audio/destination/desu",
     },
 
     station_name = {
