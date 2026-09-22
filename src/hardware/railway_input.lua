@@ -56,7 +56,9 @@ function RailwayInput.new(options)
         releaseDelaySeconds = releaseDelaySeconds,
         resetSide = reset.side,
         lastReset = reset.side and redstone.getInput(reset.side) or false,
-        armed = true,
+        -- Start disarmed so a line that is already HIGH after startup/chunk load is not
+        -- interpreted as a new train event. Stable LOW must be observed before arming.
+        armed = false,
     }, RailwayInput)
 end
 
