@@ -29,11 +29,14 @@ end
 function Scheduler.new(options)
     options.periodicNextAt = {}
     options.currentRequestType = nil
+
     options.guidanceConfig = nil
     options.guidanceAvailable = false
     options.guidanceQueued = false
     options.guidanceNextAt = nil
     options.guidanceWaitingForDeparture = false
+    options.guidanceGeneration = 0
+
     return setmetatable(options, Scheduler)
 end
 
@@ -78,17 +81,27 @@ function Scheduler:_guidanceAudioAvailable(path)
 end
 
 -- function: Set the next guidance bell deadline from the current time.
-function Scheduler:_scheduleGuidance(delaySeconds)
+function Scheduler:_scheduleGuidance(delaySeconds, reason)
     if not self.guidanceAvailable then
         self.guidanceNextAt = nil
         return
     end
 
-    self.guidanceNextAt = now() + (math.max(0, tonumber(delaySeconds) or 0) * 1000)
+    local delay = math.max(0, tonumber(delaySeconds) or 0)
+    self.guidanceNextAt = now() + (delay * 1000)
+
+    if self.logger then
+        self.logger.event("Guidance timer", ("%s %.3fs"):format(
+            tostring(reason or "scheduled"),
+            delay
+        ))
+    end
 end
 
--- function: Clear any queued guidance request and its queue state.
-function Scheduler:_dropGuidanceQueue()
+-- function: Remove queued guidance work and invalidate older guidance playback callbacks.
+function Scheduler:_resetGuidanceCycle()
+    self.guidanceGeneration = self.guidanceGeneration + 1
+    self.guidanceNextAt = nil
     self.queue:removeTypes({ guidance_bell = true })
     self.guidanceQueued = false
 end
@@ -109,7 +122,7 @@ function Scheduler:_initializeGuidance()
     end
 
     self.guidanceAvailable = true
-    self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds)
+    self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds, "startup initial")
 
     if self.logger then
         self.logger.info(("Guidance bell enabled: initialDelay=%.3fs interval=%.3fs priority=%s file=%s"):format(
@@ -203,6 +216,10 @@ function Scheduler:_enqueue(typeName, priorityOverride)
         createdAt = createdAt,
     }
 
+    if typeName == "guidance_bell" then
+        request.guidanceGeneration = self.guidanceGeneration
+    end
+
     if ttl and ttl > 0 then
         request.expiresAt = createdAt + ttl
     end
@@ -217,6 +234,7 @@ function Scheduler:_enqueue(typeName, priorityOverride)
 
     if typeName == "guidance_bell" then
         self.guidanceQueued = true
+        self.guidanceNextAt = nil
     end
 
     if priority >= self:_preemptPriority() then
@@ -234,8 +252,7 @@ end
 function Scheduler:_handleApproach()
     self.trackState:set("PLATFORM")
     self.guidanceWaitingForDeparture = false
-    self.guidanceNextAt = nil
-    self:_dropGuidanceQueue()
+    self:_resetGuidanceCycle()
 
     if self.logger then
         self.logger.event("State", "PLATFORM (approach)")
@@ -250,9 +267,8 @@ function Scheduler:_handleDeparture()
     self.trackState:set("IDLE")
 
     if self.guidanceAvailable then
+        self:_resetGuidanceCycle()
         self.guidanceWaitingForDeparture = true
-        self.guidanceNextAt = nil
-        self:_dropGuidanceQueue()
     end
 
     if self.logger then
@@ -283,10 +299,10 @@ function Scheduler:_handleReset()
     self.queue:removeBelow(priority)
     self.player:interruptBelow(priority)
     self:_handleStateChange()
-    self:_dropGuidanceQueue()
 
     if self.guidanceAvailable then
-        self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds)
+        self:_resetGuidanceCycle()
+        self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds, "reset initial")
     end
 
     if self.logger then
@@ -389,6 +405,7 @@ function Scheduler:_composeRequest(request, metadata)
         if not self.guidanceAvailable
             or self.trackState:get() == "PLATFORM"
             or self.guidanceWaitingForDeparture
+            or request.guidanceGeneration ~= self.guidanceGeneration
         then
             return {}, {}
         end
@@ -399,16 +416,44 @@ function Scheduler:_composeRequest(request, metadata)
     return self.composer:compose(request, metadata)
 end
 
--- function: Complete timing transitions after one request.
-function Scheduler:_afterRequest(request)
-    if request.type == "departure" and self.guidanceWaitingForDeparture then
-        self.guidanceWaitingForDeparture = false
-        if self.guidanceAvailable and self.trackState:get() ~= "PLATFORM" then
-            self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds)
-        else
+-- function: Complete guidance timing transitions after one request finishes.
+function Scheduler:_afterRequest(request, completed, hadSegments)
+    if request.type == "departure" then
+        if self.guidanceWaitingForDeparture then
+            self.guidanceWaitingForDeparture = false
             self.guidanceNextAt = nil
+
+            if self.guidanceAvailable and self.trackState:get() ~= "PLATFORM" then
+                self:_scheduleGuidance(
+                    self.guidanceConfig.initialDelaySeconds,
+                    "departure initial"
+                )
+            end
         end
+        return
     end
+
+    if request.type ~= "guidance_bell" then
+        return
+    end
+
+    if request.guidanceGeneration ~= self.guidanceGeneration then
+        return
+    end
+
+    if not hadSegments then
+        return
+    end
+
+    if self.trackState:get() == "PLATFORM" or self.guidanceWaitingForDeparture then
+        self.guidanceNextAt = nil
+        return
+    end
+
+    -- intervalSeconds is the quiet interval from the actual end of this bell
+    -- to the start of the next bell. Player returns only after its completion
+    -- barrier has been accepted by every connected speaker.
+    self:_scheduleGuidance(self.guidanceConfig.intervalSeconds, "bell interval")
 end
 
 -- function: Process queued announcements sequentially with priority-aware interruption.
@@ -430,8 +475,10 @@ function Scheduler:processQueue()
 
         local metadata = self:_metadataFor(request)
         local segments, diagnostics = self:_composeRequest(request, metadata)
+        local hadSegments = #segments > 0
+        local completed = true
 
-        if #segments == 0 then
+        if not hadSegments then
             if self.logger and request.type ~= "guidance_bell" then
                 self.logger.warn("Announcement has no playable segments: " .. tostring(request.type))
                 for _, diagnostic in ipairs(diagnostics or {}) do
@@ -439,11 +486,7 @@ function Scheduler:processQueue()
                 end
             end
         else
-            if request.type == "guidance_bell" then
-                -- intervalSeconds is strictly start-to-start. This timestamp is taken
-                -- immediately before handing the bell to the single shared Player.
-                self.guidanceNextAt = now() + (self.guidanceConfig.intervalSeconds * 1000)
-            elseif self.logger then
+            if self.logger and request.type ~= "guidance_bell" then
                 self.logger.info(("Playing %s announcement at priority %s (%d segment(s))."):format(
                     tostring(request.type),
                     tostring(request.priority),
@@ -451,13 +494,14 @@ function Scheduler:processQueue()
                 ))
             end
 
-            local completed = self.player:playSegments(segments, request.priority)
+            completed = self.player:playSegments(segments, request.priority)
+
             if not completed and self.logger and request.type ~= "guidance_bell" then
                 self.logger.info("Announcement interrupted: " .. tostring(request.type))
             end
         end
 
-        self:_afterRequest(request)
+        self:_afterRequest(request, completed, hadSegments)
         self.currentRequestType = nil
     end
 end
