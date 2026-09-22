@@ -1,6 +1,14 @@
 local MtrAdapter = {}
 MtrAdapter.__index = MtrAdapter
 
+local TRAIN_CLASS_IDS = {
+    "special_rapid",
+    "semi_rapid",
+    "express",
+    "rapid",
+    "local",
+}
+
 -- function: Trim leading and trailing ASCII whitespace.
 local function trim(value)
     return value:match("^%s*(.-)%s*$")
@@ -93,6 +101,31 @@ local function normalizeAssetId(value)
     end
 
     return normalized
+end
+
+-- function: Resolve a known train class by matching its normalized name within the route number.
+local function classIdFromRouteNumber(value)
+    if type(value) ~= "string" then
+        return nil
+    end
+
+    local normalized = value:lower()
+    normalized = normalized:gsub("[^a-z0-9]+", "_")
+    normalized = normalized:gsub("^_+", "")
+    normalized = normalized:gsub("_+$", "")
+
+    if normalized == "" then
+        return nil
+    end
+
+    local searchable = "_" .. normalized .. "_"
+    for _, classId in ipairs(TRAIN_CLASS_IDS) do
+        if searchable:find("_" .. classId .. "_", 1, true) then
+            return classId
+        end
+    end
+
+    return nil
 end
 
 -- function: Remove trailing slashes from the configured MTR API base URL.
@@ -382,7 +415,7 @@ function MtrAdapter:getMetadata(context)
         return nil
     end
 
-    local classId = normalizeAssetId(arrival.routeNumber)
+    local classId = classIdFromRouteNumber(arrival.routeNumber)
     local destinationId = normalizeAssetId(arrival.destination)
     local carCount = carCountFromArrival(arrival)
     local terminating = arrival.isTerminating == true
