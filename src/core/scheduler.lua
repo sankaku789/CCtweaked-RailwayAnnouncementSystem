@@ -33,6 +33,11 @@ function Scheduler:_preemptPriority()
     return tonumber(queue.preemptPriority) or 100
 end
 
+-- function: Return whether guidance bell playback is allowed for the current track state.
+function Scheduler:_guidanceBellAllowed()
+    return self.trackState:get() ~= "PLATFORM"
+end
+
 -- function: Remove queued periodic announcement requests.
 function Scheduler:_dropPeriodicQueue()
     local types = {}
@@ -245,7 +250,9 @@ function Scheduler:monitorGuidanceBell()
     end
 
     self.guidanceBell:run(function(typeName, priority)
-        self:_enqueue(typeName, priority)
+        if self:_guidanceBellAllowed() then
+            self:_enqueue(typeName, priority)
+        end
     end)
 end
 
@@ -264,6 +271,10 @@ end
 -- function: Resolve playback items for one queued request.
 function Scheduler:_composeRequest(request, metadata)
     if request.type == "guidance_bell" and self.guidanceBell then
+        if not self:_guidanceBellAllowed() then
+            return {}, {}
+        end
+
         return self.guidanceBell:compose()
     end
 
@@ -286,7 +297,7 @@ function Scheduler:processQueue()
         local segments, diagnostics = self:_composeRequest(request, metadata)
 
         if #segments == 0 then
-            if self.logger then
+            if self.logger and request.type ~= "guidance_bell" then
                 self.logger.warn("Announcement has no playable segments: " .. tostring(request.type))
                 for _, diagnostic in ipairs(diagnostics or {}) do
                     self.logger.warn("  - " .. tostring(diagnostic))
