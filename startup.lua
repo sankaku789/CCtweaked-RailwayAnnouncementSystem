@@ -4,6 +4,40 @@ local DEFAULT_RESTART_DELAY_SECONDS = 5
 local DEFAULT_STABLE_RUN_SECONDS = 60
 local DEFAULT_MAX_CONSECUTIVE_FAILURES = 5
 
+local PROJECT_MODULE_PREFIXES = {
+    "adapter.",
+    "announcement_patterns.",
+    "audio.",
+    "core.",
+    "hardware.",
+    "metadata.",
+    "util.",
+}
+
+-- function: Return whether one loaded module belongs to this application.
+local function isProjectModule(name)
+    if name == "app" or name == "config" then
+        return true
+    end
+
+    for _, prefix in ipairs(PROJECT_MODULE_PREFIXES) do
+        if name:sub(1, #prefix) == prefix then
+            return true
+        end
+    end
+
+    return false
+end
+
+-- function: Clear cached application modules so a restart always uses current files.
+local function clearProjectModules()
+    for name in pairs(package.loaded) do
+        if isProjectModule(name) then
+            package.loaded[name] = nil
+        end
+    end
+end
+
 -- function: Load runtime restart settings without preventing startup error recovery.
 local function loadRuntimeOptions()
     local options = {
@@ -33,8 +67,7 @@ end
 
 -- function: Load and run a fresh application instance.
 local function runApplication()
-    package.loaded["app"] = nil
-    package.loaded["config"] = nil
+    clearProjectModules()
 
     local app = require("app")
     app.run()
