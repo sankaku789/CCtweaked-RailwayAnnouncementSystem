@@ -264,6 +264,17 @@ function Speakers:_handleLockMessage(senderId, message)
     end
 end
 
+-- function: Observe one shared-protocol message outside the acquire loop.
+function Speakers:observeSharedMessage(senderId, message, protocol)
+    if not self.sharedNetworkReady or protocol ~= self.lockProtocol then
+        return false
+    end
+
+    self:_handleLockMessage(senderId, message)
+    self:_pruneLockState()
+    return true
+end
+
 -- function: Receive one lock message while remaining responsive to a local playback interrupt.
 function Speakers:_receiveLockMessage(timeoutSeconds, interruptEventName)
     local result = nil
