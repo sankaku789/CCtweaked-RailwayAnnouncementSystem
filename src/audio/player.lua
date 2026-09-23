@@ -7,6 +7,7 @@ local DFPWM_READ_SIZE = 4 * 1024
 local PCM_CHUNK_SIZE = 128 * 1024
 local PLAYBACK_COMPLETION_BARRIER = { 0 }
 local INTERRUPT_EVENT = "railway_player_interrupt"
+local SHARED_LOCK_HEARTBEAT_SECONDS = 0.1
 
 -- function: Check whether a playback item is an explicit pause directive.
 local function isPause(item)
@@ -183,22 +184,8 @@ function Player:_waitPause(seconds)
     end
 end
 
--- function: Play an ordered list of audio and pause items at one announcement priority.
-function Player:playSegments(segments, priority, onAudioStarted)
-    self.currentPriority = tonumber(priority) or 0
-    self.interruptRequested = false
-    self.playbackAcquired = false
-
-    local acquired = self.speakers:acquirePlayback(INTERRUPT_EVENT)
-    if not acquired or self.interruptRequested then
-        self.currentPriority = nil
-        self.interruptRequested = false
-        self.playbackAcquired = false
-        return false
-    end
-
-    self.playbackAcquired = true
-
+-- function: Run the actual announcement after the shared speaker set has been acquired.
+function Player:_playAcquiredSegments(segments, onAudioStarted)
     local startedCallback = onAudioStarted
     local started = false
 
@@ -253,11 +240,50 @@ function Player:playSegments(segments, priority, onAudioStarted)
     if self.interruptRequested or not completed then
         self.speakers:stop()
         self.speakers:drainEvents()
-        completed = false
+        return false
+    end
+
+    -- Keep the inter-computer lock until the final speaker buffer has actually
+    -- become empty, so a following computer cannot append audio mid-sentence.
+    return self.speakers:finishPlayback(INTERRUPT_EVENT)
+end
+
+-- function: Play an ordered list of audio and pause items at one announcement priority.
+function Player:playSegments(segments, priority, onAudioStarted)
+    self.currentPriority = tonumber(priority) or 0
+    self.interruptRequested = false
+    self.playbackAcquired = false
+
+    local acquired = self.speakers:acquirePlayback(INTERRUPT_EVENT)
+    if not acquired or self.interruptRequested then
+        self.currentPriority = nil
+        self.interruptRequested = false
+        self.playbackAcquired = false
+        return false
+    end
+
+    self.playbackAcquired = true
+
+    local completed = false
+    local function playback()
+        completed = self:_playAcquiredSegments(segments, onAudioStarted)
+    end
+
+    if self.speakers.sharedNetworkReady then
+        -- Keep announcing ownership even when decoding, pausing, or waiting for
+        -- the speaker buffer, so a late-arriving computer cannot mistake silence
+        -- on the lock protocol for an idle speaker set.
+        parallel.waitForAny(
+            playback,
+            function()
+                while true do
+                    self.speakers:renewPlayback()
+                    sleep(SHARED_LOCK_HEARTBEAT_SECONDS)
+                end
+            end
+        )
     else
-        -- Keep the inter-computer lock until the final speaker buffer has actually
-        -- become empty, so a following computer cannot append audio mid-sentence.
-        completed = self.speakers:finishPlayback(INTERRUPT_EVENT)
+        playback()
     end
 
     self.speakers:releasePlayback()
