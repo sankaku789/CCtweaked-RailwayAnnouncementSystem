@@ -3,6 +3,8 @@ local Protocol = require("core.protocol")
 local PlaybackClient = {}
 PlaybackClient.__index = PlaybackClient
 
+local RETRY_SECONDS = 0.5
+
 local TERMINAL_ACTIONS = {
     [Protocol.ACTION.PLAY_COMPLETED] = true,
     [Protocol.ACTION.PLAY_INTERRUPTED] = true,
@@ -47,6 +49,22 @@ function PlaybackClient:_submit(payload)
     )
 end
 
+-- function: Send cancellation for the active request through local or rednet transport.
+function PlaybackClient:_sendCancel(requestId)
+    if self.localServer then
+        self.localServer:cancel(os.getComputerID(), requestId)
+        return true
+    end
+
+    return Protocol.send(
+        self.serverId,
+        self.groupId,
+        Protocol.ACTION.PLAY_CANCEL,
+        { requestId = requestId },
+        self.instanceId
+    )
+end
+
 -- function: Cancel the current submitted request when a higher local priority supersedes it.
 function PlaybackClient:_cancelCurrent()
     if not self.current or self.current.cancelRequested then
@@ -54,17 +72,7 @@ function PlaybackClient:_cancelCurrent()
     end
 
     self.current.cancelRequested = true
-    if self.localServer then
-        self.localServer:cancel(os.getComputerID(), self.current.requestId)
-    else
-        Protocol.send(
-            self.serverId,
-            self.groupId,
-            Protocol.ACTION.PLAY_CANCEL,
-            { requestId = self.current.requestId },
-            self.instanceId
-        )
-    end
+    self:_sendCancel(self.current.requestId)
     return true
 end
 
@@ -78,33 +86,59 @@ function PlaybackClient:interruptBelow(priority)
     return self:_cancelCurrent()
 end
 
--- function: Wait for one lifecycle response for the active request.
-function PlaybackClient:_waitResponse(requestId)
+-- function: Return a matching lifecycle packet from local or rednet transport.
+function PlaybackClient:_matchingResponse(event, requestId)
+    local message = nil
+
+    if event[1] == Protocol.PLAYBACK_EVENT then
+        message = event[2]
+    elseif event[1] == "rednet_message"
+        and tonumber(event[2]) == self.serverId
+        and event[4] == Protocol.REDNET_PROTOCOL
+    then
+        message = event[3]
+    end
+
+    if type(message) ~= "table"
+        or not Protocol.matches(message, self.groupId)
+        or type(message.payload) ~= "table"
+        or message.payload.requestId ~= requestId
+    then
+        return nil
+    end
+
+    return message
+end
+
+-- function: Wait for one lifecycle response, retrying the idempotent request/cancel on packet loss.
+function PlaybackClient:_waitResponse(request)
+    local retryTimer = nil
+    if not self.localServer then
+        retryTimer = os.startTimer(RETRY_SECONDS)
+    end
+
     while true do
         local event = { os.pullEvent() }
-
-        if event[1] == Protocol.PLAYBACK_EVENT then
-            local message = event[2]
-            if type(message) == "table"
-                and Protocol.matches(message, self.groupId)
-                and type(message.payload) == "table"
-                and message.payload.requestId == requestId
-            then
-                return message
+        local message = self:_matchingResponse(event, request.requestId)
+        if message then
+            if retryTimer and type(os.cancelTimer) == "function" then
+                os.cancelTimer(retryTimer)
             end
-        elseif event[1] == "rednet_message" then
-            local senderId = tonumber(event[2])
-            local message = event[3]
-            local protocol = event[4]
+            return message
+        end
 
-            if senderId == self.serverId
-                and protocol == Protocol.REDNET_PROTOCOL
-                and Protocol.matches(message, self.groupId)
-                and type(message.payload) == "table"
-                and message.payload.requestId == requestId
+        if retryTimer and event[1] == "timer" and event[2] == retryTimer then
+            if self.current
+                and self.current.requestId == request.requestId
+                and self.current.cancelRequested
             then
-                return message
+                self:_sendCancel(request.requestId)
+            else
+                -- Reusing requestId is intentional: the Server deduplicates this
+                -- retry and returns the latest lifecycle state without replaying.
+                self:_submit(request)
             end
+            retryTimer = os.startTimer(RETRY_SECONDS)
         end
     end
 end
@@ -127,15 +161,12 @@ function PlaybackClient:playSegments(segments, priority, onAudioStarted, announc
         cancelRequested = false,
     }
 
-    if not self:_submit(request) then
-        self.current = nil
-        return false
-    end
+    self:_submit(request)
 
     local started = false
 
     while true do
-        local message = self:_waitResponse(requestId)
+        local message = self:_waitResponse(request)
         local action = message.action
         local payload = message.payload or {}
 
