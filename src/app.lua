@@ -267,6 +267,10 @@ local function monitorGuidanceOwnership(scheduler, player, speakers)
             local computerId = sharedMessageComputerId(speakers, senderId, message, protocol)
 
             if computerId then
+                if type(speakers.observeSharedMessage) == "function" then
+                    speakers:observeSharedMessage(senderId, message, protocol)
+                end
+
                 if message.action == GUIDANCE_PRESENCE_ACTION then
                     peers[computerId] = now()
                     updateGuidanceOwner(peers, electionReadyAt, scheduler, player, speakers)
