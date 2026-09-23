@@ -211,6 +211,8 @@ function GuidanceServer:onPlaybackFinished(request, completed, completedAt)
         if completed then
             self.nextBellAt = completedAt + (self.intervalSeconds * 1000)
         else
+            -- Leave the deadline unresolved until the normal request which
+            -- interrupted this bell finishes and publishes its own policy.
             self.nextBellAt = nil
         end
         return
@@ -250,12 +252,19 @@ function GuidanceServer:_tryQueueBell()
         return
     end
 
+    -- Never invent a new initial-delay deadline while normal playback is active
+    -- or queued. Its completion/state transition decides the correct restart
+    -- policy (for example passing uses interval, departure uses initial delay).
+    if not self.playbackServer:isIdle() then
+        return
+    end
+
     if self.nextBellAt == nil then
         self.nextBellAt = now() + (self.initialDelaySeconds * 1000)
         return
     end
 
-    if now() < self.nextBellAt or not self.playbackServer:isIdle() then
+    if now() < self.nextBellAt then
         return
     end
 
