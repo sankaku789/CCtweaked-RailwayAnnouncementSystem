@@ -220,7 +220,12 @@ local function downloadFile(repositoryPath, preserveExisting)
         existingSize = fs.getSize(target)
     end
 
-    local freeSpace = fs.getFreeSpace(target)
+    local spacePath = fs.getDir(target)
+    if spacePath == "" then
+        spacePath = INSTALL_ROOT
+    end
+
+    local freeSpace = fs.getFreeSpace(spacePath)
     local contentSize = #content
 
     -- Prefer atomic replacement when enough free space exists for a second copy.
