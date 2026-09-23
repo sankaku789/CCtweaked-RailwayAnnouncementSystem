@@ -77,6 +77,8 @@ local LEGACY_FILES = {
     "audio/player.lua",
     "audio/segment.lua",
     "src/hardware/shared_speakers.lua",
+    "src/core/shared_guidance.lua",
+    "src/core/shared_guidance_policy.lua",
 }
 
 local LEGACY_DIRECTORIES = {
