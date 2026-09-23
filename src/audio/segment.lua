@@ -336,4 +336,28 @@ function Segment:resolve(id, context, requirePlayable)
     return applyClientAsset(id, definition, paths)
 end
 
+-- function: Resolve Client-owned assets which do not require request or metadata context.
+function Segment:staticClientAssets()
+    local assets = {}
+
+    for id, definition in pairs(self.definitions) do
+        if type(definition) == "table" and clientAssetKey(id, definition) then
+            local items = self:resolve(id, nil, true)
+            if type(items) == "table" then
+                for _, item in ipairs(items) do
+                    if type(item) == "table"
+                        and item.kind == "client_asset"
+                        and type(item.key) == "string"
+                        and type(item.path) == "string"
+                    then
+                        assets[#assets + 1] = item
+                    end
+                end
+            end
+        end
+    end
+
+    return assets
+end
+
 return Segment
