@@ -56,7 +56,17 @@ function AssetClient.new(options)
         instanceId = options.instanceId,
         localAssetServer = options.localAssetServer,
         logger = options.logger,
+        ready = {},
     }, AssetClient)
+end
+
+-- function: Remember one signature confirmed by the bound Server for this boot.
+function AssetClient:_markReady(assetKey, path, size, checksum)
+    self.ready[assetKey] = {
+        path = path,
+        size = size,
+        checksum = checksum,
+    }
 end
 
 -- function: Return one matching asset response from the bound Server.
@@ -106,7 +116,7 @@ function AssetClient:_request(action, payload, allowedActions, expectedIndex)
     end
 end
 
--- function: Synchronize one Client-owned asset before announcements start.
+-- function: Synchronize one Client-owned asset before its playback request is submitted.
 function AssetClient:sync(assetKey, path)
     if not validKey(assetKey) then
         return false, "invalid asset key: " .. tostring(assetKey)
@@ -117,6 +127,15 @@ function AssetClient:sync(assetKey, path)
         return false, checksumError
     end
 
+    local ready = self.ready[assetKey]
+    if ready
+        and ready.path == path
+        and tonumber(ready.size) == size
+        and ready.checksum == checksum
+    then
+        return true
+    end
+
     if self.localAssetServer then
         local ok, reason = self.localAssetServer:registerLocal(
             os.getComputerID(),
@@ -125,8 +144,11 @@ function AssetClient:sync(assetKey, path)
             size,
             checksum
         )
-        if ok and self.logger then
-            self.logger.info(("Client asset ready: %s (%d bytes, local)"):format(assetKey, size))
+        if ok then
+            self:_markReady(assetKey, path, size, checksum)
+            if self.logger then
+                self.logger.info(("Client asset ready: %s (%d bytes, local)"):format(assetKey, size))
+            end
         end
         return ok, reason
     end
@@ -150,6 +172,7 @@ function AssetClient:sync(assetKey, path)
     end
 
     if query.action == Protocol.ACTION.ASSET_READY then
+        self:_markReady(assetKey, path, size, checksum)
         if self.logger then
             self.logger.info(("Client asset ready: %s (%d bytes, cached)"):format(assetKey, size))
         end
@@ -225,6 +248,7 @@ function AssetClient:sync(assetKey, path)
         return false, tostring((commit.payload or {}).reason or "asset commit failed")
     end
 
+    self:_markReady(assetKey, path, size, checksum)
     if self.logger then
         self.logger.info(("Client asset uploaded: %s (%d bytes)"):format(assetKey, size))
     end
