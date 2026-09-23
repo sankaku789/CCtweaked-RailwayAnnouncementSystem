@@ -24,6 +24,7 @@ local DEFAULT_DEPARTURE_MELODY_END_LEAD_SECONDS = 3
 local SHARED_LOCK_SYSTEM = "railway_announcement_speaker_lock"
 local SHARED_LOCK_VERSION = 1
 local GUIDANCE_PRESENCE_ACTION = "guidance_presence"
+local GUIDANCE_TRACK_STATE_ACTION = "guidance_track_state"
 local GUIDANCE_OWNER_HEARTBEAT_SECONDS = 1
 local GUIDANCE_OWNER_LEASE_MS = 3500
 local GUIDANCE_OWNER_ELECTION_SECONDS = 0.4
@@ -156,12 +157,9 @@ local function buildDepartureTiming(adapter, resolver)
     return timing
 end
 
--- function: Return whether guidance bell playback needs shared-owner coordination.
-local function sharedGuidanceEnabled(speakers)
-    local bell = type(config.guidanceBell) == "table" and config.guidanceBell or nil
-    return bell ~= nil
-        and bell.enabled == true
-        and speakers.sharedNetworkReady == true
+-- function: Return whether this computer participates in shared guidance coordination.
+local function sharedCoordinationEnabled(speakers)
+    return speakers.sharedNetworkReady == true
 end
 
 -- function: Return the computer ID from one valid message for this shared speaker set.
@@ -178,52 +176,93 @@ local function sharedMessageComputerId(speakers, senderId, message, protocol)
     return tonumber(message.computerId) or tonumber(senderId)
 end
 
--- function: Announce this computer as an active candidate for guidance-bell ownership.
-local function broadcastGuidancePresence(speakers)
+-- function: Return whether this computer may be elected as the guidance-bell owner.
+local function localGuidanceCandidate()
+    local bell = type(config.guidanceBell) == "table" and config.guidanceBell or nil
+    return bell ~= nil and bell.enabled == true
+end
+
+-- function: Broadcast this computer's liveness, owner eligibility, and current local track state.
+local function broadcastGuidancePresence(scheduler, speakers)
     local message = {
         system = SHARED_LOCK_SYSTEM,
         version = SHARED_LOCK_VERSION,
         key = speakers.lockKey,
         action = GUIDANCE_PRESENCE_ACTION,
         computerId = os.getComputerID(),
+        guidanceCandidate = localGuidanceCandidate(),
+        trackState = scheduler.trackState:get(),
     }
 
     return pcall(rednet.broadcast, message, speakers.lockProtocol)
 end
 
--- function: Elect one guidance-bell owner and interrupt a bell that lost ownership.
-local function updateGuidanceOwner(peers, electionReadyAt, scheduler, player, speakers)
+-- function: Broadcast an immediate local track-state change without changing another computer's TrackState.
+local function broadcastGuidanceTrackState(speakers, state)
+    local message = {
+        system = SHARED_LOCK_SYSTEM,
+        version = SHARED_LOCK_VERSION,
+        key = speakers.lockKey,
+        action = GUIDANCE_TRACK_STATE_ACTION,
+        computerId = os.getComputerID(),
+        trackState = state,
+    }
+
+    return pcall(rednet.broadcast, message, speakers.lockProtocol)
+end
+
+-- function: Apply one remote computer's state only to the guidance-bell suppression map.
+local function updateRemotePlatform(remotePlatforms, computerId, state, scheduler)
+    computerId = tonumber(computerId)
+    if not computerId or computerId == os.getComputerID() then
+        return
+    end
+
+    if state == "PLATFORM" then
+        remotePlatforms[computerId] = true
+    elseif state == "IDLE" then
+        remotePlatforms[computerId] = nil
+    else
+        return
+    end
+
+    scheduler:setRemoteGuidanceBlocked(next(remotePlatforms) ~= nil)
+end
+
+-- function: Elect one guidance-bell owner and remove stale remote platform blocks.
+local function updateGuidanceOwner(peers, remotePlatforms, electionReadyAt, scheduler, player, speakers)
     local currentTime = now()
 
-    for computerId, lastSeen in pairs(peers) do
-        if currentTime - (tonumber(lastSeen) or 0) > GUIDANCE_OWNER_LEASE_MS then
+    for computerId, peer in pairs(peers) do
+        if currentTime - (tonumber(peer.lastSeen) or 0) > GUIDANCE_OWNER_LEASE_MS then
             peers[computerId] = nil
+            remotePlatforms[computerId] = nil
         end
     end
+    scheduler:setRemoteGuidanceBlocked(next(remotePlatforms) ~= nil)
 
     if currentTime < electionReadyAt then
         return
     end
 
     local ownerId = nil
-    for computerId in pairs(peers) do
+    for computerId, peer in pairs(peers) do
         computerId = tonumber(computerId)
-        if computerId and (ownerId == nil or computerId < ownerId) then
+        if computerId
+            and peer.guidanceCandidate == true
+            and (ownerId == nil or computerId < ownerId)
+        then
             ownerId = computerId
         end
-    end
-
-    if ownerId == nil then
-        return
     end
 
     local localId = os.getComputerID()
     local wasOwner = speakers.guidanceOwnerReady == true
         and tonumber(speakers.guidanceOwnerId) == localId
-    local changed = speakers.guidanceOwnerReady ~= true
+    local changed = speakers.guidanceOwnerReady ~= (ownerId ~= nil)
         or tonumber(speakers.guidanceOwnerId) ~= ownerId
 
-    speakers.guidanceOwnerReady = true
+    speakers.guidanceOwnerReady = ownerId ~= nil
     speakers.guidanceOwnerId = ownerId
 
     if wasOwner
@@ -233,7 +272,7 @@ local function updateGuidanceOwner(peers, electionReadyAt, scheduler, player, sp
         player:interruptBelow(REMOTE_GUIDANCE_INTERRUPT_PRIORITY)
     end
 
-    if changed then
+    if changed and ownerId then
         if ownerId == localId then
             log.info(("Guidance bell owner elected: computer %d (local)."):format(ownerId))
         else
@@ -242,17 +281,21 @@ local function updateGuidanceOwner(peers, electionReadyAt, scheduler, player, sp
     end
 end
 
--- function: Auto-elect one guidance-bell owner and yield its bell to remote normal announcements.
+-- function: Coordinate automatic bell ownership and remote platform-state suppression.
 local function monitorGuidanceOwnership(scheduler, player, speakers)
     local localId = os.getComputerID()
     local peers = {
-        [localId] = now(),
+        [localId] = {
+            lastSeen = now(),
+            guidanceCandidate = localGuidanceCandidate(),
+        },
     }
+    local remotePlatforms = {}
     local electionReadyAt = now() + (GUIDANCE_OWNER_ELECTION_SECONDS * 1000)
 
     speakers.guidanceOwnerReady = false
     speakers.guidanceOwnerId = nil
-    broadcastGuidancePresence(speakers)
+    broadcastGuidancePresence(scheduler, speakers)
 
     local heartbeatTimer = os.startTimer(GUIDANCE_OWNER_HEARTBEAT_SECONDS)
     local electionTimer = os.startTimer(GUIDANCE_OWNER_ELECTION_SECONDS)
@@ -272,8 +315,26 @@ local function monitorGuidanceOwnership(scheduler, player, speakers)
                 end
 
                 if message.action == GUIDANCE_PRESENCE_ACTION then
-                    peers[computerId] = now()
-                    updateGuidanceOwner(peers, electionReadyAt, scheduler, player, speakers)
+                    peers[computerId] = {
+                        lastSeen = now(),
+                        guidanceCandidate = message.guidanceCandidate == true,
+                    }
+                    updateRemotePlatform(remotePlatforms, computerId, message.trackState, scheduler)
+                    updateGuidanceOwner(
+                        peers,
+                        remotePlatforms,
+                        electionReadyAt,
+                        scheduler,
+                        player,
+                        speakers
+                    )
+                elseif message.action == GUIDANCE_TRACK_STATE_ACTION then
+                    peers[computerId] = peers[computerId] or {
+                        lastSeen = now(),
+                        guidanceCandidate = false,
+                    }
+                    peers[computerId].lastSeen = now()
+                    updateRemotePlatform(remotePlatforms, computerId, message.trackState, scheduler)
                 elseif message.action == "request"
                     and computerId ~= localId
                     and speakers.guidanceOwnerReady == true
@@ -284,12 +345,29 @@ local function monitorGuidanceOwnership(scheduler, player, speakers)
                 end
             end
         elseif event == "timer" and first == heartbeatTimer then
-            peers[localId] = now()
-            broadcastGuidancePresence(speakers)
-            updateGuidanceOwner(peers, electionReadyAt, scheduler, player, speakers)
+            peers[localId] = {
+                lastSeen = now(),
+                guidanceCandidate = localGuidanceCandidate(),
+            }
+            broadcastGuidancePresence(scheduler, speakers)
+            updateGuidanceOwner(
+                peers,
+                remotePlatforms,
+                electionReadyAt,
+                scheduler,
+                player,
+                speakers
+            )
             heartbeatTimer = os.startTimer(GUIDANCE_OWNER_HEARTBEAT_SECONDS)
         elseif event == "timer" and first == electionTimer then
-            updateGuidanceOwner(peers, electionReadyAt, scheduler, player, speakers)
+            updateGuidanceOwner(
+                peers,
+                remotePlatforms,
+                electionReadyAt,
+                scheduler,
+                player,
+                speakers
+            )
             electionTimer = nil
         end
     end
@@ -327,9 +405,12 @@ function app.run()
         guidanceBell = guidanceBell,
         departureTiming = departureTiming,
         departureTimingAdapter = adapter,
+        sharedTrackNotifier = speakers.sharedNetworkReady and function(state)
+            broadcastGuidanceTrackState(speakers, state)
+        end or nil,
     })
 
-    if sharedGuidanceEnabled(speakers) then
+    if sharedCoordinationEnabled(speakers) then
         parallel.waitForAll(
             function()
                 scheduler:run()
