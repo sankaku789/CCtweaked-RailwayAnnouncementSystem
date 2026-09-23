@@ -16,8 +16,10 @@ local Cache = require("metadata.cache")
 local MetadataProvider = require("metadata.provider")
 local Scheduler = require("core.client.scheduler")
 local Coordinator = require("core.client.coordinator")
+local AssetClient = require("core.client.assets")
 local PlaybackClient = require("core.client.playback")
 local GuidanceClient = require("core.client.guidance")
+local AssetServer = require("core.server.assets")
 local PlaybackServer = require("core.server.playback")
 local GuidanceServer = require("core.server.guidance")
 
@@ -45,17 +47,36 @@ local function loadAdapter()
     return module
 end
 
-local function departureMelodyDurationSeconds(resolver)
-    local ok, paths, reason = pcall(resolver.resolve, resolver, "departure_melody", nil, true)
-    if not ok then
-        return nil, nil, paths
+local function localAudioPath(item)
+    if type(item) == "string" then
+        return item
     end
 
-    if type(paths) ~= "table" or #paths ~= 1 or type(paths[1]) ~= "string" then
+    if type(item) == "table"
+        and (item.kind == "audio" or item.kind == "client_asset")
+        and type(item.path) == "string"
+    then
+        return item.path
+    end
+
+    return nil
+end
+
+local function departureMelodyDurationSeconds(resolver)
+    local ok, items, reason = pcall(resolver.resolve, resolver, "departure_melody", nil, true)
+    if not ok then
+        return nil, nil, items
+    end
+
+    if type(items) ~= "table" or #items ~= 1 then
         return nil, nil, reason or "departure melody did not resolve to exactly one audio file"
     end
 
-    local path = paths[1]
+    local path = localAudioPath(items[1])
+    if not path then
+        return nil, nil, reason or "departure melody did not resolve to a local audio path"
+    end
+
     return fs.getSize(path) / DFPWM_BYTES_PER_SECOND, path, nil
 end
 
@@ -143,6 +164,18 @@ local function buildDepartureTiming(adapter, resolver)
     return timing
 end
 
+local function syncStaticClientAssets(resolver, assetClient)
+    for _, asset in ipairs(resolver:staticClientAssets()) do
+        local ok, reason = assetClient:sync(asset.key, asset.path)
+        if not ok then
+            error(("Client asset synchronization failed (%s): %s"):format(
+                tostring(asset.key),
+                tostring(reason)
+            ))
+        end
+    end
+end
+
 -- function: Start the unified Client/Server railway announcement application.
 function app.run()
     log.info("Railway Announcement System starting.")
@@ -152,15 +185,22 @@ function app.run()
 
     local speakers = nil
     local player = nil
+    local assetServer = nil
     local playbackServer = nil
     local guidanceServer = nil
 
     if coordinator:ownsServer() then
         speakers = Speakers.connect(config.speaker, log)
         player = Player.new(speakers, log)
+        assetServer = AssetServer.new({
+            logger = log,
+            groupId = coordinator:getGroupId(),
+            instanceId = coordinator:getInstanceId(),
+        })
         guidanceServer = GuidanceServer.new(config.guidanceBell, log)
         playbackServer = PlaybackServer.new({
             player = player,
+            assets = assetServer,
             guidance = guidanceServer,
             logger = log,
             groupId = coordinator:getGroupId(),
@@ -169,11 +209,20 @@ function app.run()
         coordinator:setLocalServer(playbackServer)
     end
 
+    local assetClient = AssetClient.new({
+        groupId = coordinator:getGroupId(),
+        serverId = coordinator:getServerId(),
+        instanceId = coordinator:getInstanceId(),
+        localAssetServer = assetServer,
+        logger = log,
+    })
+
     local playbackClient = PlaybackClient.new({
         groupId = coordinator:getGroupId(),
         serverId = coordinator:getServerId(),
         instanceId = coordinator:getInstanceId(),
         localServer = playbackServer,
+        assets = assetClient,
         logger = log,
     })
 
@@ -194,6 +243,11 @@ function app.run()
     local queue = Queue.new()
     local resolver = Segment.new(config, segmentDefinitions)
     local composer = Composer.new(announcementPatterns, resolver, announcementComposites, routeOptions)
+
+    -- Static Client-owned assets are synchronized before the scheduler can emit
+    -- an announcement. PlaybackClient also synchronizes on demand so dynamic
+    -- clientAsset definitions remain supported.
+    syncStaticClientAssets(resolver, assetClient)
 
     local adapter = loadAdapter()
     local departureTiming = buildDepartureTiming(adapter, resolver)
