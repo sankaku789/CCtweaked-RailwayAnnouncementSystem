@@ -46,9 +46,7 @@ return {
 
     guidanceBell = {
         enabled = false,
-        -- Required when speaker.shared.enabled is true. Set the computer ID of
-        -- the single computer responsible for the guidance bell.
-        ownerComputerId = nil,
+        -- With shared speakers, one active computer is elected automatically.
         path = "audio/guidance/bell.dfpwm",
         initialDelaySeconds = 7,
         intervalSeconds = 1,
