@@ -50,9 +50,14 @@ function PlaybackClient:_submit(payload)
 end
 
 -- function: Send cancellation for the active request through local or rednet transport.
-function PlaybackClient:_sendCancel(requestId)
+function PlaybackClient:_sendCancel(requestId, reason)
+    local payload = {
+        requestId = requestId,
+        reason = reason,
+    }
+
     if self.localServer then
-        self.localServer:cancel(os.getComputerID(), requestId)
+        self.localServer:cancel(os.getComputerID(), requestId, reason)
         return true
     end
 
@@ -60,7 +65,7 @@ function PlaybackClient:_sendCancel(requestId)
         self.serverId,
         self.groupId,
         Protocol.ACTION.PLAY_CANCEL,
-        { requestId = requestId },
+        payload,
         self.instanceId
     )
 end
@@ -72,7 +77,8 @@ function PlaybackClient:_cancelCurrent()
     end
 
     self.current.cancelRequested = true
-    self:_sendCancel(self.current.requestId)
+    self.current.cancelReason = "superseded"
+    self:_sendCancel(self.current.requestId, self.current.cancelReason)
     return true
 end
 
@@ -132,7 +138,7 @@ function PlaybackClient:_waitResponse(request)
                 and self.current.requestId == request.requestId
                 and self.current.cancelRequested
             then
-                self:_sendCancel(request.requestId)
+                self:_sendCancel(request.requestId, self.current.cancelReason)
             else
                 -- Reusing requestId is intentional: the Server deduplicates this
                 -- retry and returns the latest lifecycle state without replaying.
@@ -159,6 +165,7 @@ function PlaybackClient:playSegments(segments, priority, onAudioStarted, announc
         requestId = requestId,
         priority = request.priority,
         cancelRequested = false,
+        cancelReason = nil,
     }
 
     self:_submit(request)
