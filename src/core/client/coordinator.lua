@@ -184,12 +184,31 @@ end
 
 -- function: Resolve this computer's fixed server binding for the current boot.
 function Coordinator:initialize()
+    local boundServerId = self:_loadBinding()
     self.networkReady = Protocol.openNetwork(self.logger)
+
+    -- A modemless installation can only be a local C/S system. This keeps the
+    -- single-computer path unified without weakening an existing remote binding.
     if not self.networkReady then
-        self:_reboot("Announcement C/S network unavailable; rebooting")
+        if boundServerId and boundServerId ~= self.computerId then
+            self:_reboot(("Bound announcement server %s requires network; rebooting"):format(
+                tostring(boundServerId)
+            ))
+        end
+
+        self.serverId = self.computerId
+        self.isServer = true
+        self.lastServerSeenAt = now()
+        if boundServerId == nil then
+            self:_saveBinding(self.computerId)
+        end
+
+        if self.logger then
+            self.logger.info("No modem available; using local Client/Server transport.")
+        end
+        return self
     end
 
-    local boundServerId = self:_loadBinding()
     if boundServerId then
         self.serverId = boundServerId
         self.isServer = boundServerId == self.computerId
@@ -292,12 +311,14 @@ function Coordinator:_heartbeat()
     end
 
     if self.isServer then
-        Protocol.broadcast(
-            self.groupId,
-            Protocol.ACTION.SERVER_PRESENCE,
-            { serverId = self.computerId },
-            self.instanceId
-        )
+        if self.networkReady then
+            Protocol.broadcast(
+                self.groupId,
+                Protocol.ACTION.SERVER_PRESENCE,
+                { serverId = self.computerId },
+                self.instanceId
+            )
+        end
 
         if self.localServer then
             self.localServer:observeClientPresence(self.computerId, {
@@ -322,6 +343,12 @@ end
 
 -- function: Handle coordination messages after startup.
 function Coordinator:_monitorNetwork()
+    if not self.networkReady then
+        while true do
+            sleep(60)
+        end
+    end
+
     while true do
         local _, senderId, message, protocol = os.pullEvent("rednet_message")
         if protocol == Protocol.REDNET_PROTOCOL and Protocol.matches(message, self.groupId) then
