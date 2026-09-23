@@ -67,7 +67,14 @@ function Scheduler.new(options)
     options.guidanceNextAt = nil
     options.guidanceGeneration = 0
     options.guidanceDurationSeconds = nil
+
+    -- Remote guidance constraints never mutate this computer's TrackState.
     options.remoteGuidanceBlocked = false
+    options.remoteGuidanceResumeAt = nil
+
+    -- This deadline is published to peers so bell-disabled computers can still
+    -- contribute their local departure/next-train timing policy.
+    options.sharedGuidanceResumeAt = nil
 
     return setmetatable(options, Scheduler)
 end
@@ -78,13 +85,9 @@ function Scheduler:_preemptPriority()
     return tonumber(queue.preemptPriority) or 100
 end
 
--- function: Return normalized guidance bell settings.
+-- function: Return normalized guidance bell settings even when local playback is disabled.
 function Scheduler:_readGuidanceConfig()
-    local cfg = self.config.guidanceBell
-    if type(cfg) ~= "table" then
-        return { enabled = false }
-    end
-
+    local cfg = type(self.config.guidanceBell) == "table" and self.config.guidanceBell or {}
     local path = type(cfg.path) == "string" and cfg.path or DEFAULT_GUIDANCE_PATH
     if path == "" then
         path = DEFAULT_GUIDANCE_PATH
@@ -145,46 +148,82 @@ function Scheduler:_resetGuidanceCycle()
     self.guidanceQueued = false
 end
 
--- function: Notify the shared coordinator about this computer's local track state.
-function Scheduler:_notifySharedTrackState(state)
+-- function: Return the local resume deadline published to shared peers.
+function Scheduler:getSharedGuidanceResumeAt()
+    return tonumber(self.sharedGuidanceResumeAt)
+end
+
+-- function: Notify the shared coordinator about this computer's local policy state.
+function Scheduler:_notifySharedTrackState(state, guidanceResumeAt)
     if type(self.sharedTrackNotifier) ~= "function" then
         return
     end
 
-    local ok, err = pcall(self.sharedTrackNotifier, state)
+    local ok, err = pcall(self.sharedTrackNotifier, state, guidanceResumeAt)
     if not ok and self.logger then
         self.logger.warn("Shared track-state notification failed: " .. tostring(err))
     end
 end
 
--- function: Suppress only guidance-bell scheduling while a remote platform is occupied.
-function Scheduler:setRemoteGuidanceBlocked(blocked)
+-- function: Return whether a remote platform, announcement, or resume delay suppresses the bell.
+function Scheduler:_remoteGuidanceConstrained()
+    local resumeAt = tonumber(self.remoteGuidanceResumeAt)
+    return self.remoteGuidanceBlocked == true
+        or (resumeAt ~= nil and resumeAt > now())
+end
+
+-- function: Apply remote guidance constraints without changing the local TrackState.
+function Scheduler:setRemoteGuidanceGate(blocked, resumeAt)
     blocked = blocked == true
-    if self.remoteGuidanceBlocked == blocked then
+    resumeAt = tonumber(resumeAt)
+
+    local currentTime = now()
+    if resumeAt and resumeAt <= currentTime then
+        resumeAt = nil
+    end
+
+    local oldBlocked = self.remoteGuidanceBlocked == true
+    local oldResumeAt = tonumber(self.remoteGuidanceResumeAt)
+    local oldHadConstraint = oldBlocked or oldResumeAt ~= nil
+    local newHadConstraint = blocked or resumeAt ~= nil
+
+    if oldBlocked == blocked and oldResumeAt == resumeAt then
         return
     end
 
     self.remoteGuidanceBlocked = blocked
+    self.remoteGuidanceResumeAt = resumeAt
 
-    if blocked then
+    if newHadConstraint then
         self:_resetGuidanceCycle()
         if self.currentRequestType == "guidance_bell" then
             self.player:interruptBelow(REMOTE_GUIDANCE_INTERRUPT_PRIORITY)
         end
 
-        if self.logger then
-            self.logger.event("Guidance", "remote platform occupied")
+        if self.logger and not oldHadConstraint then
+            self.logger.event("Guidance", "shared suppression active")
         end
         return
     end
 
-    if self.guidanceAvailable and self.trackState:get() ~= "PLATFORM" then
+    if oldHadConstraint
+        and self.guidanceAvailable
+        and self.trackState:get() ~= "PLATFORM"
+    then
         self:_resetGuidanceCycle()
-        self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds, "remote departure initial")
+
+        -- A stale hard block has no explicit deadline, so use the normal initial
+        -- delay. A completed resume deadline already encoded its own delay.
+        local delaySeconds = 0
+        if oldBlocked and oldResumeAt == nil then
+            delaySeconds = self.guidanceConfig.initialDelaySeconds
+        end
+
+        self:_scheduleGuidance(delaySeconds, "shared suppression cleared")
     end
 
-    if self.logger then
-        self.logger.event("Guidance", "remote platform cleared")
+    if self.logger and oldHadConstraint then
+        self.logger.event("Guidance", "shared suppression cleared")
     end
 end
 
@@ -218,7 +257,7 @@ end
 -- function: Return whether a guidance request may be queued now.
 function Scheduler:_guidanceDue()
     return self.guidanceAvailable
-        and not self.remoteGuidanceBlocked
+        and not self:_remoteGuidanceConstrained()
         and self.trackState:get() ~= "PLATFORM"
         and not self.guidanceQueued
         and self.currentRequestType == nil
@@ -396,7 +435,8 @@ end
 -- function: Handle an APPROACH pulse and enable the PLATFORM periodic announcement mode.
 function Scheduler:_handleApproach()
     self.trackState:set("PLATFORM")
-    self:_notifySharedTrackState("PLATFORM")
+    self.sharedGuidanceResumeAt = nil
+    self:_notifySharedTrackState("PLATFORM", nil)
     self:_resetGuidanceCycle()
 
     if self.logger then
@@ -411,7 +451,6 @@ end
 function Scheduler:_handleDeparture()
     local departureAt = now()
     self.trackState:set("IDLE")
-    self:_notifySharedTrackState("IDLE")
 
     if self.guidanceAvailable then
         self:_resetGuidanceCycle()
@@ -425,21 +464,25 @@ function Scheduler:_handleDeparture()
     self:_invalidateMetadata()
 
     local departureDelaySeconds, dwellTimeMs = self:_resolveDepartureTiming()
+    local dwellSeconds = 0
+    local reason = "departure initial fallback"
+
+    if dwellTimeMs and dwellTimeMs >= 0 then
+        dwellSeconds = dwellTimeMs / 1000
+        reason = "departure dwell+initial"
+    elseif self.logger and self.guidanceAvailable then
+        self.logger.warn("MTR dwell time unavailable; using departure initial fallback")
+    end
+
+    self.sharedGuidanceResumeAt = departureAt
+        + ((dwellSeconds + self.guidanceConfig.initialDelaySeconds) * 1000)
+    self:_notifySharedTrackState("IDLE", self.sharedGuidanceResumeAt)
+
     self:_enqueue("departure", nil, {
         departurePlayAt = departureAt + (departureDelaySeconds * 1000),
     })
 
     if self.guidanceAvailable then
-        local dwellSeconds = 0
-        local reason = "departure initial fallback"
-
-        if dwellTimeMs and dwellTimeMs >= 0 then
-            dwellSeconds = dwellTimeMs / 1000
-            reason = "departure dwell+initial"
-        elseif self.logger then
-            self.logger.warn("MTR dwell time unavailable; using departure initial fallback")
-        end
-
         self:_scheduleGuidanceFrom(
             departureAt,
             dwellSeconds + self.guidanceConfig.initialDelaySeconds,
@@ -459,14 +502,17 @@ end
 
 -- function: Handle the direct reset button and enable the IDLE periodic announcement mode.
 function Scheduler:_handleReset()
+    local resetAt = now()
     self.trackState:set("IDLE")
-    self:_notifySharedTrackState("IDLE")
     self:_invalidateMetadata()
 
     local priority = self:_preemptPriority()
     self.queue:removeBelow(priority)
     self.player:interruptBelow(priority)
     self:_handleStateChange()
+
+    self.sharedGuidanceResumeAt = resetAt + (self.guidanceConfig.initialDelaySeconds * 1000)
+    self:_notifySharedTrackState("IDLE", self.sharedGuidanceResumeAt)
 
     if self.guidanceAvailable then
         self:_resetGuidanceCycle()
@@ -569,7 +615,7 @@ end
 function Scheduler:_composeRequest(request, metadata)
     if request.type == "guidance_bell" then
         if not self.guidanceAvailable
-            or self.remoteGuidanceBlocked
+            or self:_remoteGuidanceConstrained()
             or self.trackState:get() == "PLATFORM"
             or request.guidanceGeneration ~= self.guidanceGeneration
         then
@@ -585,20 +631,27 @@ end
 -- function: Complete guidance timing transitions after one request finishes.
 function Scheduler:_afterRequest(request, completed, hadSegments)
     if request.type == "next_train" then
-        if not self.guidanceAvailable
-            or request.guidanceGeneration ~= self.guidanceGeneration
-            or not hadSegments
-        then
-            return
-        end
-
-        if self.remoteGuidanceBlocked or self.trackState:get() == "PLATFORM" then
-            self.guidanceNextAt = nil
+        if not hadSegments then
             return
         end
 
         if not request.guidanceStartedAt or not completed then
-            self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds, "next_train fallback initial")
+            self.sharedGuidanceResumeAt = now()
+                + (self.guidanceConfig.initialDelaySeconds * 1000)
+            self:_notifySharedTrackState(
+                self.trackState:get(),
+                self.sharedGuidanceResumeAt
+            )
+
+            if self.guidanceAvailable
+                and not self:_remoteGuidanceConstrained()
+                and self.trackState:get() ~= "PLATFORM"
+            then
+                self:_scheduleGuidance(
+                    self.guidanceConfig.initialDelaySeconds,
+                    "next_train fallback initial"
+                )
+            end
         end
         return
     end
@@ -615,7 +668,7 @@ function Scheduler:_afterRequest(request, completed, hadSegments)
         return
     end
 
-    if self.remoteGuidanceBlocked or self.trackState:get() == "PLATFORM" then
+    if self:_remoteGuidanceConstrained() or self.trackState:get() == "PLATFORM" then
         self.guidanceNextAt = nil
         return
     end
@@ -655,10 +708,13 @@ function Scheduler:processQueue()
         local hadSegments = #segments > 0
         local completed = true
 
-        if hadSegments and request.type == "next_train" and self.guidanceAvailable then
-            self:_resetGuidanceCycle()
-            request.guidanceGeneration = self.guidanceGeneration
+        if hadSegments and request.type == "next_train" then
             request.guidanceDurationSeconds = playbackDurationSeconds(segments)
+
+            if self.guidanceAvailable then
+                self:_resetGuidanceCycle()
+                request.guidanceGeneration = self.guidanceGeneration
+            end
         end
 
         if not hadSegments then
@@ -687,16 +743,23 @@ function Scheduler:processQueue()
                         "bell duration+interval"
                     )
                 end
-            elseif request.type == "next_train"
-                and self.guidanceAvailable
-                and request.guidanceDurationSeconds
-            then
+            elseif request.type == "next_train" and request.guidanceDurationSeconds then
                 onAudioStarted = function(startedAt)
-                    if request.guidanceGeneration ~= self.guidanceGeneration then
+                    request.guidanceStartedAt = startedAt
+                    self.sharedGuidanceResumeAt = startedAt
+                        + ((request.guidanceDurationSeconds
+                            + self.guidanceConfig.initialDelaySeconds) * 1000)
+                    self:_notifySharedTrackState(
+                        self.trackState:get(),
+                        self.sharedGuidanceResumeAt
+                    )
+
+                    if not self.guidanceAvailable
+                        or request.guidanceGeneration ~= self.guidanceGeneration
+                    then
                         return
                     end
 
-                    request.guidanceStartedAt = startedAt
                     self:_scheduleGuidanceFrom(
                         startedAt,
                         request.guidanceDurationSeconds + self.guidanceConfig.initialDelaySeconds,
@@ -705,7 +768,12 @@ function Scheduler:processQueue()
                 end
             end
 
-            completed = self.player:playSegments(segments, request.priority, onAudioStarted)
+            completed = self.player:playSegments(
+                segments,
+                request.priority,
+                onAudioStarted,
+                request.type
+            )
 
             if not completed and self.logger and request.type ~= "guidance_bell" then
                 self.logger.info("Interrupted: " .. tostring(request.type))
