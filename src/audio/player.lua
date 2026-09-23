@@ -33,6 +33,7 @@ function Player.new(speakers, logger)
         logger = logger,
         currentPriority = nil,
         interruptRequested = false,
+        playbackAcquired = false,
     }, Player)
 end
 
@@ -57,7 +58,12 @@ function Player:interruptBelow(priority)
     end
 
     self.interruptRequested = true
-    self.speakers:stop()
+
+    -- A request waiting for another computer's shared-speaker lock must never
+    -- stop that other computer's playback. Stop only after this player owns it.
+    if self.playbackAcquired then
+        self.speakers:stop()
+    end
     os.queueEvent(INTERRUPT_EVENT)
 
     if self.logger then
@@ -181,6 +187,17 @@ end
 function Player:playSegments(segments, priority, onAudioStarted)
     self.currentPriority = tonumber(priority) or 0
     self.interruptRequested = false
+    self.playbackAcquired = false
+
+    local acquired = self.speakers:acquirePlayback(INTERRUPT_EVENT)
+    if not acquired or self.interruptRequested then
+        self.currentPriority = nil
+        self.interruptRequested = false
+        self.playbackAcquired = false
+        return false
+    end
+
+    self.playbackAcquired = true
 
     local startedCallback = onAudioStarted
     local started = false
@@ -237,8 +254,14 @@ function Player:playSegments(segments, priority, onAudioStarted)
         self.speakers:stop()
         self.speakers:drainEvents()
         completed = false
+    else
+        -- Keep the inter-computer lock until the final speaker buffer has actually
+        -- become empty, so a following computer cannot append audio mid-sentence.
+        completed = self.speakers:finishPlayback(INTERRUPT_EVENT)
     end
 
+    self.speakers:releasePlayback()
+    self.playbackAcquired = false
     self.currentPriority = nil
     self.interruptRequested = false
 
