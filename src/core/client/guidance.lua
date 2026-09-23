@@ -32,7 +32,7 @@ function GuidanceClient:_publish()
     local state = self:snapshot()
 
     if self.localServer then
-        self.localServer:observeGuidanceState(os.getComputerID(), state)
+        self.localServer:observeGuidanceState(os.getComputerID(), state, self.instanceId)
         return true
     end
 
