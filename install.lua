@@ -175,6 +175,16 @@ local function ensureParent(path)
     end
 end
 
+local function writeContent(path, content)
+    local handle = fs.open(path, "w")
+    if not handle then
+        error("Could not open file for writing: " .. path)
+    end
+
+    handle.write(content)
+    handle.close()
+end
+
 local function downloadFile(repositoryPath, preserveExisting)
     local target = targetPath(repositoryPath)
 
@@ -196,29 +206,52 @@ local function downloadFile(repositoryPath, preserveExisting)
     local content = response.readAll()
     response.close()
 
+    if fs.exists(target) and fs.isDir(target) then
+        error("Expected file but found directory: " .. target)
+    end
+
     local temporary = target .. ".download"
     if fs.exists(temporary) then
         fs.delete(temporary)
     end
 
-    local handle = fs.open(temporary, "w")
-    if not handle then
-        error("Could not open temporary file: " .. temporary)
+    local existingSize = 0
+    if fs.exists(target) then
+        existingSize = fs.getSize(target)
     end
 
-    handle.write(content)
-    handle.close()
+    local freeSpace = fs.getFreeSpace(target)
+    local contentSize = #content
+
+    -- Prefer atomic replacement when enough free space exists for a second copy.
+    if type(freeSpace) ~= "number" or freeSpace >= contentSize then
+        writeContent(temporary, content)
+
+        if fs.exists(target) then
+            fs.delete(target)
+        end
+
+        fs.move(temporary, target)
+        print("Install -> " .. repositoryPath)
+        return
+    end
+
+    -- The download is already complete in memory, so an update can safely reuse
+    -- the space occupied by the old file instead of requiring two on-disk copies.
+    if freeSpace + existingSize < contentSize then
+        error(("Out of space installing %s: need %d bytes, available %d bytes after replacement"):format(
+            repositoryPath,
+            contentSize,
+            freeSpace + existingSize
+        ))
+    end
 
     if fs.exists(target) then
-        if fs.isDir(target) then
-            fs.delete(temporary)
-            error("Expected file but found directory: " .. target)
-        end
         fs.delete(target)
     end
 
-    fs.move(temporary, target)
-    print("Install -> " .. repositoryPath)
+    writeContent(target, content)
+    print("Install -> " .. repositoryPath .. " (in-place)")
 end
 
 local function migrateLegacyPatternFiles()
