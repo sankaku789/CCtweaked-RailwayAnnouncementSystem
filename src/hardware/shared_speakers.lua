@@ -80,6 +80,7 @@ function Speakers:stop()
 end
 
 -- function: Wait until every speaker participating in this playback is ready.
+-- Keep a degraded subset across intermediate buffer waits; finishPlayback clears it.
 function Speakers:waitUntilAllReady(interruptEventName)
     if self.needsReconnect then
         self:_reconnect("Speaker connection changed. Reconnecting...")
@@ -116,8 +117,19 @@ function Speakers:waitUntilAllReady(interruptEventName)
     end
 
     self.audioOutstanding = false
-    self.degradedPlaybackDevices = nil
     return true
+end
+
+-- function: Drain the final playback buffer and then allow all speakers next time.
+function Speakers:finishPlayback(interruptEventName)
+    if not self.audioOutstanding then
+        self.degradedPlaybackDevices = nil
+        return true
+    end
+
+    local finished = self:waitUntilAllReady(interruptEventName)
+    self.degradedPlaybackDevices = nil
+    return finished
 end
 
 -- function: Submit one PCM chunk, attempting to restore synchronized speaker playback first.
