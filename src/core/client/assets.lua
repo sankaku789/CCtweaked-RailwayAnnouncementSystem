@@ -48,6 +48,10 @@ local function checksumFile(path)
     return size, ("%08x"):format((b * 65536) + a), nil
 end
 
+local function versionedKey(assetKey, size, checksum)
+    return ("%s-%d-%s"):format(assetKey, size, checksum)
+end
+
 -- function: Create a client-side synchronizer for Client-owned audio assets.
 function AssetClient.new(options)
     return setmetatable({
@@ -61,11 +65,12 @@ function AssetClient.new(options)
 end
 
 -- function: Remember one signature confirmed by the bound Server for this boot.
-function AssetClient:_markReady(assetKey, path, size, checksum)
+function AssetClient:_markReady(assetKey, path, size, checksum, transportKey)
     self.ready[assetKey] = {
         path = path,
         size = size,
         checksum = checksum,
+        transportKey = transportKey,
     }
 end
 
@@ -116,7 +121,7 @@ function AssetClient:_request(action, payload, allowedActions, expectedIndex)
     end
 end
 
--- function: Synchronize one Client-owned asset before its playback request is submitted.
+-- function: Synchronize one Client-owned asset and return its immutable transport key.
 function AssetClient:sync(assetKey, path)
     if not validKey(assetKey) then
         return false, "invalid asset key: " .. tostring(assetKey)
@@ -127,36 +132,39 @@ function AssetClient:sync(assetKey, path)
         return false, checksumError
     end
 
+    local transportKey = versionedKey(assetKey, size, checksum)
     local ready = self.ready[assetKey]
     if ready
         and ready.path == path
         and tonumber(ready.size) == size
         and ready.checksum == checksum
+        and ready.transportKey == transportKey
     then
-        return true
+        return true, transportKey
     end
 
     if self.localAssetServer then
         local ok, reason = self.localAssetServer:registerLocal(
             os.getComputerID(),
-            assetKey,
+            transportKey,
             path,
             size,
             checksum
         )
         if ok then
-            self:_markReady(assetKey, path, size, checksum)
+            self:_markReady(assetKey, path, size, checksum, transportKey)
             if self.logger then
                 self.logger.info(("Client asset ready: %s (%d bytes, local)"):format(assetKey, size))
             end
+            return true, transportKey
         end
-        return ok, reason
+        return false, reason
     end
 
     local query = self:_request(
         Protocol.ACTION.ASSET_QUERY,
         {
-            assetKey = assetKey,
+            assetKey = transportKey,
             size = size,
             checksum = checksum,
         },
@@ -172,17 +180,17 @@ function AssetClient:sync(assetKey, path)
     end
 
     if query.action == Protocol.ACTION.ASSET_READY then
-        self:_markReady(assetKey, path, size, checksum)
+        self:_markReady(assetKey, path, size, checksum, transportKey)
         if self.logger then
             self.logger.info(("Client asset ready: %s (%d bytes, cached)"):format(assetKey, size))
         end
-        return true
+        return true, transportKey
     end
 
     local begin = self:_request(
         Protocol.ACTION.ASSET_BEGIN,
         {
-            assetKey = assetKey,
+            assetKey = transportKey,
             size = size,
             checksum = checksum,
         },
@@ -211,7 +219,7 @@ function AssetClient:sync(assetKey, path)
         local response = self:_request(
             Protocol.ACTION.ASSET_CHUNK,
             {
-                assetKey = assetKey,
+                assetKey = transportKey,
                 index = index,
                 data = chunk,
             },
@@ -234,7 +242,7 @@ function AssetClient:sync(assetKey, path)
     local commit = self:_request(
         Protocol.ACTION.ASSET_COMMIT,
         {
-            assetKey = assetKey,
+            assetKey = transportKey,
             size = size,
             checksum = checksum,
         },
@@ -248,11 +256,11 @@ function AssetClient:sync(assetKey, path)
         return false, tostring((commit.payload or {}).reason or "asset commit failed")
     end
 
-    self:_markReady(assetKey, path, size, checksum)
+    self:_markReady(assetKey, path, size, checksum, transportKey)
     if self.logger then
         self.logger.info(("Client asset uploaded: %s (%d bytes)"):format(assetKey, size))
     end
-    return true
+    return true, transportKey
 end
 
 return AssetClient
