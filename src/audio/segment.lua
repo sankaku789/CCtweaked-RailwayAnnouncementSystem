@@ -188,21 +188,52 @@ function Segment:_resolveTrack(definition, context)
     return nil, "missing audio: " .. path
 end
 
--- function: Resolve a train-class audio variant from train metadata.
+-- function: Resolve the first existing train-class audio file from metadata candidates.
 function Segment:_resolveClass(definition, context)
     local metadata = context and context.metadata or nil
-    local value = type(metadata) == "table" and metadata.class or nil
-    local path = pathFromId(definition.directory, value)
-
-    if not path then
+    if type(metadata) ~= "table" then
         return nil, "train class metadata is not available"
     end
 
-    if self:exists(path) then
-        return { path }
+    local candidates = {}
+    local seen = {}
+
+    if type(metadata.classCandidates) == "table" then
+        for _, value in ipairs(metadata.classCandidates) do
+            if validId(value) then
+                value = tostring(value)
+                if not seen[value] then
+                    seen[value] = true
+                    candidates[#candidates + 1] = value
+                end
+            end
+        end
     end
 
-    return nil, "missing audio: " .. path
+    if validId(metadata.class) then
+        local value = tostring(metadata.class)
+        if not seen[value] then
+            seen[value] = true
+            candidates[#candidates + 1] = value
+        end
+    end
+
+    if #candidates == 0 then
+        return nil, "train class metadata is not available"
+    end
+
+    local attempted = {}
+    for _, value in ipairs(candidates) do
+        local path = pathFromId(definition.directory, value)
+        if path then
+            attempted[#attempted + 1] = path
+            if self:exists(path) then
+                return { path }
+            end
+        end
+    end
+
+    return nil, "missing train class audio: " .. table.concat(attempted, ", ")
 end
 
 -- function: Resolve a destination-based audio variant from train metadata.
