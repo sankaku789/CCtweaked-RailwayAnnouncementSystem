@@ -3,6 +3,8 @@ package.path = "/src/?.lua;/src/?/init.lua;" .. package.path
 local DEFAULT_RESTART_DELAY_SECONDS = 5
 local DEFAULT_STABLE_RUN_SECONDS = 60
 local DEFAULT_MAX_CONSECUTIVE_FAILURES = 5
+local CONTROLLED_RESTART_DELAY_SECONDS = 0.5
+local CONTROLLED_RESTART_MARKER = "railway_announcement_app_restart_v1"
 
 local PROJECT_MODULE_PREFIXES = {
     "adapter.",
@@ -65,12 +67,34 @@ local function loadRuntimeOptions()
     return options
 end
 
+-- function: Return whether one caught error requests an application-only restart.
+local function isControlledRestart(value)
+    return type(value) == "table" and value.marker == CONTROLLED_RESTART_MARKER
+end
+
 -- function: Load and run a fresh application instance.
 local function runApplication()
     clearProjectModules()
 
     local app = require("app")
-    app.run()
+    local originalReboot = os.reboot
+
+    -- The application uses reboot as a fail-stop signal when its fixed Server
+    -- becomes unavailable. Convert that signal into an application-only restart
+    -- so the Computer and attached peripherals are not physically rebooted.
+    os.reboot = function()
+        error({
+            marker = CONTROLLED_RESTART_MARKER,
+            reason = "Application requested restart",
+        }, 0)
+    end
+
+    local ok, err = pcall(app.run)
+    os.reboot = originalReboot
+
+    if not ok then
+        error(err, 0)
+    end
 end
 
 local consecutiveFailures = 0
@@ -86,28 +110,33 @@ while true do
         break
     end
 
-    if runDurationMs >= runtime.stableRunSeconds * 1000 then
-        consecutiveFailures = 0
-    end
-    consecutiveFailures = consecutiveFailures + 1
-
-    if ok then
-        printError("Railway Announcement System stopped unexpectedly without an error.")
+    if not ok and isControlledRestart(err) then
+        print("Railway Announcement System restarting application only.")
+        sleep(CONTROLLED_RESTART_DELAY_SECONDS)
     else
-        printError("Railway Announcement System stopped: " .. tostring(err))
-    end
+        if runDurationMs >= runtime.stableRunSeconds * 1000 then
+            consecutiveFailures = 0
+        end
+        consecutiveFailures = consecutiveFailures + 1
 
-    if consecutiveFailures >= runtime.maxConsecutiveFailures then
-        printError(("Automatic restart stopped after %d consecutive failure(s)."):format(
-            consecutiveFailures
+        if ok then
+            printError("Railway Announcement System stopped unexpectedly without an error.")
+        else
+            printError("Railway Announcement System stopped: " .. tostring(err))
+        end
+
+        if consecutiveFailures >= runtime.maxConsecutiveFailures then
+            printError(("Automatic restart stopped after %d consecutive failure(s)."):format(
+                consecutiveFailures
+            ))
+            break
+        end
+
+        print(("Restarting in %.1f second(s)... (%d/%d)"):format(
+            runtime.restartDelaySeconds,
+            consecutiveFailures,
+            runtime.maxConsecutiveFailures
         ))
-        break
+        sleep(runtime.restartDelaySeconds)
     end
-
-    print(("Restarting in %.1f second(s)... (%d/%d)"):format(
-        runtime.restartDelaySeconds,
-        consecutiveFailures,
-        runtime.maxConsecutiveFailures
-    ))
-    sleep(runtime.restartDelaySeconds)
 end
