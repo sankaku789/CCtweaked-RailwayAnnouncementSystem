@@ -3,6 +3,15 @@ local Protocol = require("core.protocol")
 local PlaybackServer = {}
 PlaybackServer.__index = PlaybackServer
 
+local TERMINAL_ACTIONS = {
+    [Protocol.ACTION.PLAY_COMPLETED] = true,
+    [Protocol.ACTION.PLAY_INTERRUPTED] = true,
+    [Protocol.ACTION.PLAY_CANCELLED] = true,
+    [Protocol.ACTION.PLAY_FAILED] = true,
+    [Protocol.ACTION.PLAY_EXPIRED] = true,
+    [Protocol.ACTION.PLAY_REJECTED] = true,
+}
+
 local function now()
     return os.epoch("utc")
 end
@@ -149,15 +158,16 @@ function PlaybackServer:submit(sourceId, request)
         internalGuidance = false,
     }
 
-    self.seen[seenKey] = {
-        action = Protocol.ACTION.PLAY_ACCEPTED,
-        payload = { requestId = queued.requestId },
-    }
-
-    self:_reply(sourceId, Protocol.ACTION.PLAY_ACCEPTED, {
+    local acceptedPayload = {
         requestId = queued.requestId,
         acceptedAt = now(),
-    })
+    }
+    self.seen[seenKey] = {
+        action = Protocol.ACTION.PLAY_ACCEPTED,
+        payload = acceptedPayload,
+    }
+
+    self:_reply(sourceId, Protocol.ACTION.PLAY_ACCEPTED, acceptedPayload)
     self:_enqueue(queued)
     return true
 end
@@ -196,7 +206,7 @@ function PlaybackServer:cancel(sourceId, requestId)
 
     local seenKey = ("%s:%s"):format(tostring(sourceId), requestId)
     local seen = self.seen[seenKey]
-    if seen and seen.action ~= Protocol.ACTION.PLAY_ACCEPTED then
+    if seen and TERMINAL_ACTIONS[seen.action] then
         self:_reply(sourceId, seen.action, seen.payload or { requestId = requestId })
         return true
     end
@@ -334,10 +344,19 @@ function PlaybackServer:_processQueue()
                 function(epoch)
                     startedAt = tonumber(epoch) or now()
                     if request.sourceId ~= 0 then
-                        self:_reply(request.sourceId, Protocol.ACTION.PLAY_STARTED, {
+                        local payload = {
                             requestId = request.requestId,
                             startedAt = startedAt,
-                        })
+                        }
+                        local seenKey = ("%s:%s"):format(
+                            tostring(request.sourceId),
+                            request.requestId
+                        )
+                        self.seen[seenKey] = {
+                            action = Protocol.ACTION.PLAY_STARTED,
+                            payload = payload,
+                        }
+                        self:_reply(request.sourceId, Protocol.ACTION.PLAY_STARTED, payload)
                     end
                 end,
                 request.label
