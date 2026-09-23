@@ -1,51 +1,17 @@
 local MtrAdapter = {}
 MtrAdapter.__index = MtrAdapter
 
-local TRAIN_CLASS_IDS = {
-    "special_rapid",
-    "semi_rapid",
-    "express",
-    "rapid",
-    "local",
-}
-
 -- function: Trim leading and trailing ASCII whitespace.
 local function trim(value)
     return value:match("^%s*(.-)%s*$")
 end
 
--- function: Extract the English part of an MTR multilingual name.
-local function englishPart(value)
-    if type(value) ~= "string" then
-        return nil
-    end
-
-    local firstPipe = value:find("|", 1, true)
-    local selected
-
-    if firstPipe then
-        local remaining = value:sub(firstPipe + 1)
-        local nextPipe = remaining:find("|", 1, true)
-
-        if nextPipe then
-            selected = remaining:sub(1, nextPipe - 1)
-        else
-            selected = remaining
-        end
-    else
-        selected = value
-    end
-
-    selected = trim(selected)
-    if selected == "" then
-        return nil
-    end
-
-    return selected
-end
-
 -- function: Check whether a string contains printable ASCII characters only.
 local function isPrintableAscii(value)
+    if type(value) ~= "string" or value == "" then
+        return false
+    end
+
     for index = 1, #value do
         local byte = value:byte(index)
         if byte < 32 or byte > 126 then
@@ -56,17 +22,55 @@ local function isPrintableAscii(value)
     return true
 end
 
--- function: Select the printable ASCII display name used for exact configuration matching.
-local function asciiName(value)
-    local selected = englishPart(value)
-    if not selected or not isPrintableAscii(selected) then
-        return nil
+-- function: Split one MTR multilingual value without assuming any language order.
+local function nameParts(value)
+    local result = {}
+    if type(value) ~= "string" then
+        return result
     end
 
-    return selected
+    local startIndex = 1
+    while true do
+        local separator = value:find("|", startIndex, true)
+        local part
+
+        if separator then
+            part = value:sub(startIndex, separator - 1)
+        else
+            part = value:sub(startIndex)
+        end
+
+        part = trim(part)
+        if part ~= "" then
+            result[#result + 1] = part
+        end
+
+        if not separator then
+            break
+        end
+        startIndex = separator + 1
+    end
+
+    return result
 end
 
--- function: Match a configured station or platform name exactly against raw or English MTR text.
+-- function: Extract a printable ASCII part of an MTR multilingual name regardless of its position.
+local function englishPart(value)
+    for _, part in ipairs(nameParts(value)) do
+        if isPrintableAscii(part) then
+            return part
+        end
+    end
+
+    return nil
+end
+
+-- function: Select the printable ASCII display name used for normalized asset IDs.
+local function asciiName(value)
+    return englishPart(value)
+end
+
+-- function: Match a configured station or platform name against any MTR multilingual component.
 local function nameMatches(value, expected)
     if type(value) ~= "string" or type(expected) ~= "string" then
         return false
@@ -81,31 +85,18 @@ local function nameMatches(value, expected)
         return true
     end
 
-    return asciiName(value) == expected
-end
-
--- function: Normalize an MTR English name into a case-insensitive audio asset ID.
-local function normalizeAssetId(value)
-    local english = englishPart(value)
-    if not english or not isPrintableAscii(english) then
-        return nil
+    for _, part in ipairs(nameParts(value)) do
+        if part == expected then
+            return true
+        end
     end
 
-    local normalized = english:lower()
-    normalized = normalized:gsub("[^a-z0-9]+", "_")
-    normalized = normalized:gsub("^_+", "")
-    normalized = normalized:gsub("_+$", "")
-
-    if normalized == "" then
-        return nil
-    end
-
-    return normalized
+    return false
 end
 
--- function: Resolve a known train class by matching its normalized name within the route number.
-local function classIdFromRouteNumber(value)
-    if type(value) ~= "string" then
+-- function: Normalize one printable ASCII name into a case-insensitive audio asset ID.
+local function normalizeAssetIdPart(value)
+    if not isPrintableAscii(value) then
         return nil
     end
 
@@ -118,14 +109,29 @@ local function classIdFromRouteNumber(value)
         return nil
     end
 
-    local searchable = "_" .. normalized .. "_"
-    for _, classId in ipairs(TRAIN_CLASS_IDS) do
-        if searchable:find("_" .. classId .. "_", 1, true) then
-            return classId
+    return normalized
+end
+
+-- function: Normalize every printable ASCII component of an MTR multilingual value.
+local function normalizeAssetIds(value)
+    local result = {}
+    local seen = {}
+
+    for _, part in ipairs(nameParts(value)) do
+        local normalized = normalizeAssetIdPart(part)
+        if normalized and not seen[normalized] then
+            seen[normalized] = true
+            result[#result + 1] = normalized
         end
     end
 
-    return nil
+    return result
+end
+
+-- function: Normalize the first printable ASCII component for single-value metadata fields.
+local function normalizeAssetId(value)
+    local normalized = normalizeAssetIds(value)
+    return normalized[1]
 end
 
 -- function: Remove trailing slashes from the configured MTR API base URL.
@@ -460,7 +466,10 @@ function MtrAdapter:getMetadata(context)
         return nil
     end
 
-    local classId = classIdFromRouteNumber(arrival.routeNumber)
+    -- Keep every printable routeNumber component as a class audio candidate.
+    -- The segment resolver chooses the first candidate whose audio file exists.
+    local classCandidates = normalizeAssetIds(arrival.routeNumber)
+    local classId = classCandidates[1]
     local destinationId = normalizeAssetId(arrival.destination)
     local carCount = carCountFromArrival(arrival)
     local terminating = arrival.isTerminating == true
@@ -476,6 +485,7 @@ function MtrAdapter:getMetadata(context)
 
     return {
         class = classId,
+        classCandidates = classCandidates,
         destination = destinationId,
         carCount = carCount,
         terminating = terminating,

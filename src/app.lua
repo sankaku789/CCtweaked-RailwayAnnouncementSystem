@@ -12,17 +12,22 @@ local Queue = require("core.announcement_queue")
 local Segment = require("audio.segment")
 local Composer = require("core.composer")
 local Player = require("audio.player")
-local GuidanceBell = require("audio.guidance_bell")
 local Cache = require("metadata.cache")
 local MetadataProvider = require("metadata.provider")
-local Scheduler = require("core.scheduler")
+local Scheduler = require("core.client.scheduler")
+local Coordinator = require("core.client.coordinator")
+local AssetClient = require("core.client.assets")
+local PlaybackClient = require("core.client.playback")
+local GuidanceClient = require("core.client.guidance")
+local AssetServer = require("core.server.assets")
+local PlaybackServer = require("core.server.playback")
+local GuidanceServer = require("core.server.guidance")
 
 local app = {}
 
 local DFPWM_BYTES_PER_SECOND = 6000
 local DEFAULT_DEPARTURE_MELODY_END_LEAD_SECONDS = 3
 
--- function: Load the configured metadata adapter with a safe fallback.
 local function loadAdapter()
     local name = config.adapter and config.adapter.module or "none"
     local moduleName = "adapter." .. tostring(name)
@@ -39,26 +44,42 @@ local function loadAdapter()
     if type(module.new) == "function" then
         return module.new(config.adapter or {})
     end
-
     return module
 end
 
--- function: Return the duration and path of the configured departure melody.
-local function departureMelodyDurationSeconds(resolver)
-    local ok, paths, reason = pcall(resolver.resolve, resolver, "departure_melody", nil, true)
-    if not ok then
-        return nil, nil, paths
+local function localAudioPath(item)
+    if type(item) == "string" then
+        return item
     end
 
-    if type(paths) ~= "table" or #paths ~= 1 or type(paths[1]) ~= "string" then
+    if type(item) == "table"
+        and (item.kind == "audio" or item.kind == "client_asset")
+        and type(item.path) == "string"
+    then
+        return item.path
+    end
+
+    return nil
+end
+
+local function departureMelodyDurationSeconds(resolver)
+    local ok, items, reason = pcall(resolver.resolve, resolver, "departure_melody", nil, true)
+    if not ok then
+        return nil, nil, items
+    end
+
+    if type(items) ~= "table" or #items ~= 1 then
         return nil, nil, reason or "departure melody did not resolve to exactly one audio file"
     end
 
-    local path = paths[1]
+    local path = localAudioPath(items[1])
+    if not path then
+        return nil, nil, reason or "departure melody did not resolve to a local audio path"
+    end
+
     return fs.getSize(path) / DFPWM_BYTES_PER_SECOND, path, nil
 end
 
--- function: Return the configured gap between melody end and scheduled departure.
 local function departureMelodyEndLeadSeconds()
     local departureConfig = type(config.announcement) == "table" and config.announcement.departure or nil
     local leadSeconds = type(departureConfig) == "table" and tonumber(departureConfig.melodyEndLeadSeconds) or nil
@@ -70,7 +91,6 @@ local function departureMelodyEndLeadSeconds()
     return math.max(0, leadSeconds)
 end
 
--- function: Build the startup departure timing profile.
 local function buildDepartureTiming(adapter, resolver)
     local fallbackDelaySeconds = math.max(0, tonumber(config.TIMEOUT_TIMING) or 0)
     local melodySeconds, melodyPath, melodyError = departureMelodyDurationSeconds(resolver)
@@ -144,22 +164,88 @@ local function buildDepartureTiming(adapter, resolver)
     return timing
 end
 
--- function: Start and run the railway announcement application.
+local function syncStaticClientAssets(resolver, assetClient)
+    for _, asset in ipairs(resolver:staticClientAssets()) do
+        local ok, reason = assetClient:sync(asset.key, asset.path)
+        if not ok then
+            error(("Client asset synchronization failed (%s): %s"):format(
+                tostring(asset.key),
+                tostring(reason)
+            ))
+        end
+    end
+end
+
+-- function: Start the unified Client/Server railway announcement application.
 function app.run()
     log.info("Railway Announcement System starting.")
 
+    local coordinator = Coordinator.new(config, log)
+    coordinator:initialize()
+
+    local speakers = nil
+    local player = nil
+    local assetServer = nil
+    local playbackServer = nil
+    local guidanceServer = nil
+
+    if coordinator:ownsServer() then
+        speakers = Speakers.connect(config.speaker, log)
+        player = Player.new(speakers, log)
+        assetServer = AssetServer.new({
+            logger = log,
+            groupId = coordinator:getGroupId(),
+            instanceId = coordinator:getInstanceId(),
+        })
+        guidanceServer = GuidanceServer.new(config.guidanceBell, log)
+        playbackServer = PlaybackServer.new({
+            player = player,
+            assets = assetServer,
+            guidance = guidanceServer,
+            logger = log,
+            groupId = coordinator:getGroupId(),
+            instanceId = coordinator:getInstanceId(),
+        })
+        coordinator:setLocalServer(playbackServer)
+    end
+
+    local assetClient = AssetClient.new({
+        groupId = coordinator:getGroupId(),
+        serverId = coordinator:getServerId(),
+        instanceId = coordinator:getInstanceId(),
+        localAssetServer = assetServer,
+        logger = log,
+    })
+
+    local playbackClient = PlaybackClient.new({
+        groupId = coordinator:getGroupId(),
+        serverId = coordinator:getServerId(),
+        instanceId = coordinator:getInstanceId(),
+        localServer = playbackServer,
+        assets = assetClient,
+        logger = log,
+    })
+
+    local guidanceClient = GuidanceClient.new({
+        groupId = coordinator:getGroupId(),
+        serverId = coordinator:getServerId(),
+        instanceId = coordinator:getInstanceId(),
+        localServer = playbackServer,
+        logger = log,
+    })
+
+    coordinator:setGuidanceProvider(function()
+        return guidanceClient:snapshot()
+    end)
+
     local input = RailwayInput.new(config.input)
-    local speakers = Speakers.connect(config.speaker, log)
     local trackState = TrackState.new(config.state)
     local queue = Queue.new()
     local resolver = Segment.new(config, segmentDefinitions)
     local composer = Composer.new(announcementPatterns, resolver, announcementComposites, routeOptions)
-    local player = Player.new(speakers, log)
-    local guidanceBell = GuidanceBell.new(config.guidanceBell, log)
 
     local adapter = loadAdapter()
     local departureTiming = buildDepartureTiming(adapter, resolver)
-
     local cache = Cache.new(config.adapter.cacheTtlMs)
     local metadataProvider = MetadataProvider.new(adapter, cache, log)
 
@@ -172,13 +258,37 @@ function app.run()
         queue = queue,
         metadataProvider = metadataProvider,
         composer = composer,
-        player = player,
-        guidanceBell = guidanceBell,
+        player = playbackClient,
         departureTiming = departureTiming,
         departureTimingAdapter = adapter,
     })
 
-    scheduler:run()
+    scheduler.sharedTrackNotifier = function(state, guidanceResumeAt, guidanceHold)
+        guidanceClient:updateFromTrack(state, guidanceResumeAt, guidanceHold)
+    end
+
+    guidanceClient:updateFromTrack(trackState:get(), nil, false)
+
+    local tasks = {
+        function()
+            -- Do not start accepting railway input until static Client-owned audio
+            -- is known to the Server. Coordinator/server tasks run in parallel so
+            -- failure detection and incoming transfer handling remain live here.
+            syncStaticClientAssets(resolver, assetClient)
+            scheduler:run()
+        end,
+        function()
+            coordinator:run()
+        end,
+    }
+
+    if playbackServer then
+        tasks[#tasks + 1] = function()
+            playbackServer:run()
+        end
+    end
+
+    parallel.waitForAll(table.unpack(tasks))
 end
 
 return app

@@ -18,7 +18,19 @@ local RUNTIME_FILES = {
     "src/core/announcement_queue.lua",
     "src/core/composer.lua",
     "src/core/scheduler.lua",
+    "src/core/guidance_scheduler.lua",
     "src/core/track_state.lua",
+    "src/core/protocol.lua",
+
+    "src/core/client/assets.lua",
+    "src/core/client/coordinator.lua",
+    "src/core/client/guidance.lua",
+    "src/core/client/playback.lua",
+    "src/core/client/scheduler.lua",
+
+    "src/core/server/assets.lua",
+    "src/core/server/guidance.lua",
+    "src/core/server/playback.lua",
 
     "src/hardware/railway_input.lua",
     "src/hardware/redstone_input.lua",
@@ -66,6 +78,9 @@ local LEGACY_FILES = {
     "app.lua",
     "audio/player.lua",
     "audio/segment.lua",
+    "src/hardware/shared_speakers.lua",
+    "src/core/shared_guidance.lua",
+    "src/core/shared_guidance_policy.lua",
 }
 
 local LEGACY_DIRECTORIES = {
@@ -134,17 +149,14 @@ for _, argument in ipairs(arguments) do
     end
 end
 
--- function: Build a raw GitHub URL for one repository path.
 local function rawUrl(path)
     return ("https://raw.githubusercontent.com/%s/%s/%s"):format(REPOSITORY, ref, path)
 end
 
--- function: Resolve one repository path inside the computer root directory.
 local function targetPath(path)
     return fs.combine(INSTALL_ROOT, path)
 end
 
--- function: Ensure a directory exists and is usable as a directory.
 local function ensureDirectory(path)
     if fs.exists(path) then
         if not fs.isDir(path) then
@@ -156,7 +168,6 @@ local function ensureDirectory(path)
     fs.makeDir(path)
 end
 
--- function: Ensure the parent directory for a target file exists.
 local function ensureParent(path)
     local parent = fs.getDir(path)
     if parent ~= "" then
@@ -164,7 +175,6 @@ local function ensureParent(path)
     end
 end
 
--- function: Download one text file from GitHub and optionally preserve an existing local copy.
 local function downloadFile(repositoryPath, preserveExisting)
     local target = targetPath(repositoryPath)
 
@@ -211,7 +221,6 @@ local function downloadFile(repositoryPath, preserveExisting)
     print("Install -> " .. repositoryPath)
 end
 
--- function: Move legacy data files into the announcement_patterns directory without overwriting local files.
 local function migrateLegacyPatternFiles()
     for _, mapping in ipairs(LEGACY_PATTERN_FILES) do
         local source = targetPath(mapping.source)
@@ -238,7 +247,6 @@ local function migrateLegacyPatternFiles()
     end
 end
 
--- function: Move legacy audio assets into the current directory layout without overwriting existing targets.
 local function migrateLegacyAudioFiles()
     for _, mapping in ipairs(LEGACY_AUDIO_FILES) do
         local source = targetPath(mapping.source)
@@ -264,7 +272,6 @@ local function migrateLegacyAudioFiles()
     end
 end
 
--- function: Move DFPWM files between audio directories without overwriting existing targets.
 local function migrateDfpwmDirectory(sourceRepositoryPath, targetRepositoryPath, label)
     local sourceDirectory = targetPath(sourceRepositoryPath)
     if not fs.exists(sourceDirectory) or not fs.isDir(sourceDirectory) then
@@ -296,7 +303,6 @@ local function migrateDfpwmDirectory(sourceRepositoryPath, targetRepositoryPath,
     end
 end
 
--- function: Move legacy destination variants into desu and mairimasu directories.
 local function migrateLegacyDestinationFiles()
     migrateDfpwmDirectory("audio/approach/destination", "audio/destination/mairimasu", "destination")
     migrateDfpwmDirectory("audio/approach_destination", "audio/destination/mairimasu", "destination")
@@ -316,7 +322,6 @@ local function migrateLegacyDestinationFiles()
     end
 end
 
--- function: Move legacy track audio files into ni and wo directories without overwriting current assets.
 local function migrateLegacyTrackFiles()
     migrateDfpwmDirectory("audio/track/approach", "audio/track/ni", "track")
     migrateDfpwmDirectory("audio/track/passing", "audio/track/wo", "track")
@@ -331,7 +336,6 @@ local function migrateLegacyTrackFiles()
     end
 end
 
--- function: Create all directories reserved for DFPWM announcement assets.
 local function createAudioDirectories()
     for _, repositoryPath in ipairs(AUDIO_DIRECTORIES) do
         ensureDirectory(targetPath(repositoryPath))
@@ -339,7 +343,6 @@ local function createAudioDirectories()
     end
 end
 
--- function: Remove source files left behind by the pre-src directory layout.
 local function removeLegacyLayout()
     for _, repositoryPath in ipairs(LEGACY_FILES) do
         local path = targetPath(repositoryPath)
@@ -358,7 +361,6 @@ local function removeLegacyLayout()
     end
 end
 
--- function: Install or update runtime sources while preserving station-specific configuration and audio.
 local function install()
     if type(http) ~= "table" or type(http.get) ~= "function" then
         error("CC:Tweaked HTTP API is unavailable")

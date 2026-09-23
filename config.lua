@@ -31,10 +31,23 @@ return {
     speaker = {
         volume = 3,
         reconnectDelay = 1,
+
+        -- Coordinate complete announcements between computers which can see the
+        -- same speaker peripherals. Local announcement priorities are unchanged.
+        shared = {
+            enabled = true,
+            protocol = "railway_announcement_speaker_fcfs",
+            arbitrationWindowSeconds = 0.2,
+            retrySeconds = 0.25,
+            -- Release dead owners/waiters quickly; active playback refreshes its lease.
+            leaseMs = 5000,
+            requestLeaseMs = 5000,
+        },
     },
 
     guidanceBell = {
         enabled = false,
+        -- With shared speakers, one active computer is elected automatically.
         path = "audio/guidance/bell.dfpwm",
         initialDelaySeconds = 7,
         intervalSeconds = 1,

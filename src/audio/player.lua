@@ -8,25 +8,21 @@ local PCM_CHUNK_SIZE = 128 * 1024
 local PLAYBACK_COMPLETION_BARRIER = { 0 }
 local INTERRUPT_EVENT = "railway_player_interrupt"
 
--- function: Check whether a playback item is an explicit pause directive.
 local function isPause(item)
     return type(item) == "table" and item.kind == "pause"
 end
 
--- function: Return the audio path represented by one composed playback item.
 local function audioPath(item)
     if type(item) == "string" then
         return item
     end
-
     if type(item) == "table" and item.kind == "audio" then
         return item.path
     end
-
     return nil
 end
 
--- function: Create an audio player for the connected speakers.
+-- function: Create an audio player for the server-owned speakers.
 function Player.new(speakers, logger)
     return setmetatable({
         speakers = speakers,
@@ -36,7 +32,6 @@ function Player.new(speakers, logger)
     }, Player)
 end
 
--- function: Check whether an audio path points to a playable file.
 function Player:_validFile(path)
     return type(path) == "string"
         and path ~= ""
@@ -44,11 +39,9 @@ function Player:_validFile(path)
         and not fs.isDir(path)
 end
 
--- function: Interrupt the current announcement when a higher-priority request arrives.
-function Player:interruptBelow(priority)
-    priority = tonumber(priority) or 0
-
-    if self.currentPriority == nil or priority <= self.currentPriority then
+-- function: Interrupt the current playback unconditionally.
+function Player:interrupt()
+    if self.currentPriority == nil then
         return false
     end
 
@@ -59,6 +52,15 @@ function Player:interruptBelow(priority)
     self.interruptRequested = true
     self.speakers:stop()
     os.queueEvent(INTERRUPT_EVENT)
+    return true
+end
+
+-- function: Interrupt the current playback only when a strictly higher priority arrives.
+function Player:interruptBelow(priority)
+    priority = tonumber(priority) or 0
+    if self.currentPriority == nil or priority <= self.currentPriority then
+        return false
+    end
 
     if self.logger then
         self.logger.info(("Playback interrupted: %s -> %s"):format(
@@ -67,10 +69,9 @@ function Player:interruptBelow(priority)
         ))
     end
 
-    return true
+    return self:interrupt()
 end
 
--- function: Decode adjacent DFPWM files into one continuous PCM stream and play it without file-boundary waits.
 function Player:_playAudioRun(paths, onAudioStarted)
     local pcm = {}
     local pcmCount = 0
@@ -102,7 +103,6 @@ function Player:_playAudioRun(paths, onAudioStarted)
                 end
 
                 local decoded = decoder(input)
-
                 for sampleIndex = 1, #decoded do
                     pcmCount = pcmCount + 1
                     pcm[pcmCount] = decoded[sampleIndex]
@@ -143,12 +143,10 @@ function Player:_playAudioRun(paths, onAudioStarted)
     return true
 end
 
--- function: Decode and play one DFPWM audio file with interrupt support.
 function Player:playFile(path, onAudioStarted)
     return self:_playAudioRun({ path }, onAudioStarted)
 end
 
--- function: Wait for a pattern pause while remaining responsive to announcement interrupts.
 function Player:_waitPause(seconds)
     if self.interruptRequested then
         return false, "interrupted"
@@ -160,7 +158,6 @@ function Player:_waitPause(seconds)
     end
 
     local timerId = os.startTimer(seconds)
-
     while true do
         local event, value = os.pullEvent()
 
@@ -177,11 +174,7 @@ function Player:_waitPause(seconds)
     end
 end
 
--- function: Play an ordered list of audio and pause items at one announcement priority.
-function Player:playSegments(segments, priority, onAudioStarted)
-    self.currentPriority = tonumber(priority) or 0
-    self.interruptRequested = false
-
+function Player:_playSegments(segments, onAudioStarted)
     local startedCallback = onAudioStarted
     local started = false
 
@@ -189,7 +182,6 @@ function Player:playSegments(segments, priority, onAudioStarted)
         if started then
             return
         end
-
         started = true
 
         if startedCallback then
@@ -220,7 +212,6 @@ function Player:playSegments(segments, priority, onAudioStarted)
                 if not path then
                     error("unknown playback item kind")
                 end
-
                 paths[#paths + 1] = path
                 index = index + 1
             end
@@ -236,12 +227,21 @@ function Player:playSegments(segments, priority, onAudioStarted)
     if self.interruptRequested or not completed then
         self.speakers:stop()
         self.speakers:drainEvents()
-        completed = false
+        return false
     end
+
+    return self.speakers:finishPlayback(INTERRUPT_EVENT)
+end
+
+-- function: Play one complete server-selected request without distributed locking.
+function Player:playSegments(segments, priority, onAudioStarted)
+    self.currentPriority = tonumber(priority) or 0
+    self.interruptRequested = false
+
+    local completed = self:_playSegments(segments, onAudioStarted)
 
     self.currentPriority = nil
     self.interruptRequested = false
-
     return completed
 end
 
