@@ -3,6 +3,8 @@ local Protocol = require("core.protocol")
 local PlaybackServer = {}
 PlaybackServer.__index = PlaybackServer
 
+local SEEN_TERMINAL_RETENTION_MS = 5 * 60 * 1000
+
 local TERMINAL_ACTIONS = {
     [Protocol.ACTION.PLAY_COMPLETED] = true,
     [Protocol.ACTION.PLAY_INTERRUPTED] = true,
@@ -51,6 +53,27 @@ function PlaybackServer:_reply(clientId, action, payload)
 
     local ok = pcall(rednet.send, clientId, message, Protocol.REDNET_PROTOCOL)
     return ok
+end
+
+-- function: Store the latest lifecycle state for request deduplication.
+function PlaybackServer:_rememberSeen(key, action, payload)
+    self.seen[key] = {
+        action = action,
+        payload = payload,
+        updatedAt = now(),
+    }
+end
+
+-- function: Drop old terminal dedupe states while retaining queued/active requests.
+function PlaybackServer:_pruneSeen()
+    local current = now()
+    for key, state in pairs(self.seen) do
+        if TERMINAL_ACTIONS[state.action]
+            and current - (tonumber(state.updatedAt) or current) > SEEN_TERMINAL_RETENTION_MS
+        then
+            self.seen[key] = nil
+        end
+    end
 end
 
 -- function: Validate a client playback request without interpreting railway type.
@@ -125,6 +148,8 @@ end
 
 -- function: Submit a client request, deduplicating by source and request ID.
 function PlaybackServer:submit(sourceId, request)
+    self:_pruneSeen()
+
     sourceId = tonumber(sourceId)
     local valid, reason = self:_validate(sourceId, request)
     if not valid then
@@ -162,10 +187,7 @@ function PlaybackServer:submit(sourceId, request)
         requestId = queued.requestId,
         acceptedAt = now(),
     }
-    self.seen[seenKey] = {
-        action = Protocol.ACTION.PLAY_ACCEPTED,
-        payload = acceptedPayload,
-    }
+    self:_rememberSeen(seenKey, Protocol.ACTION.PLAY_ACCEPTED, acceptedPayload)
 
     self:_reply(sourceId, Protocol.ACTION.PLAY_ACCEPTED, acceptedPayload)
     self:_enqueue(queued)
@@ -198,6 +220,8 @@ end
 
 -- function: Cancel one queued or active request from its owning client.
 function PlaybackServer:cancel(sourceId, requestId)
+    self:_pruneSeen()
+
     sourceId = tonumber(sourceId)
     requestId = tostring(requestId or "")
     if not sourceId or requestId == "" then
@@ -236,10 +260,7 @@ function PlaybackServer:cancel(sourceId, requestId)
         requestId = requestId,
         cancelledAt = now(),
     }
-    self.seen[seenKey] = {
-        action = Protocol.ACTION.PLAY_CANCELLED,
-        payload = payload,
-    }
+    self:_rememberSeen(seenKey, Protocol.ACTION.PLAY_CANCELLED, payload)
     self:_reply(sourceId, Protocol.ACTION.PLAY_CANCELLED, payload)
     return true
 end
@@ -282,10 +303,7 @@ function PlaybackServer:_finishClientRequest(request, action, payload)
     end
 
     local seenKey = ("%s:%s"):format(tostring(request.sourceId), request.requestId)
-    self.seen[seenKey] = {
-        action = action,
-        payload = payload,
-    }
+    self:_rememberSeen(seenKey, action, payload)
     self:_reply(request.sourceId, action, payload)
 end
 
@@ -352,10 +370,7 @@ function PlaybackServer:_processQueue()
                             tostring(request.sourceId),
                             request.requestId
                         )
-                        self.seen[seenKey] = {
-                            action = Protocol.ACTION.PLAY_STARTED,
-                            payload = payload,
-                        }
+                        self:_rememberSeen(seenKey, Protocol.ACTION.PLAY_STARTED, payload)
                         self:_reply(request.sourceId, Protocol.ACTION.PLAY_STARTED, payload)
                     end
                 end
@@ -400,6 +415,7 @@ function PlaybackServer:_processQueue()
         end
 
         self.current = nil
+        self:_pruneSeen()
         os.queueEvent(Protocol.SERVER_QUEUE_EVENT)
     end
 end
