@@ -305,7 +305,11 @@ function Player:playSegments(segments, priority, onAudioStarted, announcementTyp
         return completed
     end
 
-    local acquired = self.speakers:acquirePlayback(INTERRUPT_EVENT, announcementType)
+    local acquired = self.speakers:acquirePlayback(
+        INTERRUPT_EVENT,
+        announcementType,
+        self.currentPriority
+    )
     if not acquired or self.interruptRequested then
         self.currentPriority = nil
         self.interruptRequested = false
