@@ -6,38 +6,12 @@ local function trim(value)
     return value:match("^%s*(.-)%s*$")
 end
 
--- function: Extract the English part of an MTR multilingual name.
-local function englishPart(value)
-    if type(value) ~= "string" then
-        return nil
-    end
-
-    local firstPipe = value:find("|", 1, true)
-    local selected
-
-    if firstPipe then
-        local remaining = value:sub(firstPipe + 1)
-        local nextPipe = remaining:find("|", 1, true)
-
-        if nextPipe then
-            selected = remaining:sub(1, nextPipe - 1)
-        else
-            selected = remaining
-        end
-    else
-        selected = value
-    end
-
-    selected = trim(selected)
-    if selected == "" then
-        return nil
-    end
-
-    return selected
-end
-
 -- function: Check whether a string contains printable ASCII characters only.
 local function isPrintableAscii(value)
+    if type(value) ~= "string" or value == "" then
+        return false
+    end
+
     for index = 1, #value do
         local byte = value:byte(index)
         if byte < 32 or byte > 126 then
@@ -48,17 +22,55 @@ local function isPrintableAscii(value)
     return true
 end
 
--- function: Select the printable ASCII display name used for exact configuration matching.
-local function asciiName(value)
-    local selected = englishPart(value)
-    if not selected or not isPrintableAscii(selected) then
-        return nil
+-- function: Split one MTR multilingual value without assuming any language order.
+local function nameParts(value)
+    local result = {}
+    if type(value) ~= "string" then
+        return result
     end
 
-    return selected
+    local startIndex = 1
+    while true do
+        local separator = value:find("|", startIndex, true)
+        local part
+
+        if separator then
+            part = value:sub(startIndex, separator - 1)
+        else
+            part = value:sub(startIndex)
+        end
+
+        part = trim(part)
+        if part ~= "" then
+            result[#result + 1] = part
+        end
+
+        if not separator then
+            break
+        end
+        startIndex = separator + 1
+    end
+
+    return result
 end
 
--- function: Match a configured station or platform name exactly against raw or English MTR text.
+-- function: Extract a printable ASCII part of an MTR multilingual name regardless of its position.
+local function englishPart(value)
+    for _, part in ipairs(nameParts(value)) do
+        if isPrintableAscii(part) then
+            return part
+        end
+    end
+
+    return nil
+end
+
+-- function: Select the printable ASCII display name used for normalized asset IDs.
+local function asciiName(value)
+    return englishPart(value)
+end
+
+-- function: Match a configured station or platform name against any MTR multilingual component.
 local function nameMatches(value, expected)
     if type(value) ~= "string" or type(expected) ~= "string" then
         return false
@@ -73,13 +85,19 @@ local function nameMatches(value, expected)
         return true
     end
 
-    return asciiName(value) == expected
+    for _, part in ipairs(nameParts(value)) do
+        if part == expected then
+            return true
+        end
+    end
+
+    return false
 end
 
--- function: Normalize an MTR English name into a case-insensitive audio asset ID.
+-- function: Normalize an MTR ASCII name into a case-insensitive audio asset ID.
 local function normalizeAssetId(value)
-    local english = englishPart(value)
-    if not english or not isPrintableAscii(english) then
+    local english = asciiName(value)
+    if not english then
         return nil
     end
 
@@ -119,13 +137,14 @@ local function normalizeTrainClassIds(values)
     return result
 end
 
--- function: Resolve a configured fallback train class by matching its normalized name within the route number.
+-- function: Resolve a configured fallback train class by matching any ASCII route-number component.
 local function classIdFromRouteNumber(value, trainClassIds)
-    if type(value) ~= "string" then
+    local selected = asciiName(value)
+    if not selected then
         return nil
     end
 
-    local normalized = value:lower()
+    local normalized = selected:lower()
     normalized = normalized:gsub("[^a-z0-9]+", "_")
     normalized = normalized:gsub("^_+", "")
     normalized = normalized:gsub("_+$", "")
@@ -477,9 +496,8 @@ function MtrAdapter:getMetadata(context)
         return nil
     end
 
-    -- Train class always comes from routeNumber. Prefer the existing MTR
-    -- English-part normalization; fall back to configured matching only when
-    -- routeNumber cannot be normalized directly.
+    -- Train class comes from the printable ASCII component of routeNumber,
+    -- independent of whether Japanese or English is stored first.
     local classId = normalizeAssetId(arrival.routeNumber)
     if not classId then
         classId = classIdFromRouteNumber(arrival.routeNumber, self.trainClassIds)
