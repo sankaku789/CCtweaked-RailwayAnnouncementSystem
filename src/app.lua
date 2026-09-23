@@ -21,6 +21,9 @@ local app = {}
 
 local DFPWM_BYTES_PER_SECOND = 6000
 local DEFAULT_DEPARTURE_MELODY_END_LEAD_SECONDS = 3
+local SHARED_LOCK_SYSTEM = "railway_announcement_speaker_lock"
+local SHARED_LOCK_VERSION = 1
+local REMOTE_GUIDANCE_INTERRUPT_PRIORITY = 0
 
 -- function: Load the configured metadata adapter with a safe fallback.
 local function loadAdapter()
@@ -144,12 +147,83 @@ local function buildDepartureTiming(adapter, resolver)
     return timing
 end
 
+-- function: Enable the guidance bell on exactly the configured owner when speakers are shared.
+local function configureGuidanceBellOwner()
+    local bell = type(config.guidanceBell) == "table" and config.guidanceBell or nil
+    local speaker = type(config.speaker) == "table" and config.speaker or nil
+    local shared = speaker and type(speaker.shared) == "table" and speaker.shared or nil
+
+    if not bell or bell.enabled ~= true then
+        return false
+    end
+
+    if not shared or shared.enabled ~= true then
+        return true
+    end
+
+    local ownerComputerId = tonumber(bell.ownerComputerId)
+    if ownerComputerId == nil then
+        bell.enabled = false
+        log.warn("Guidance bell disabled on shared speakers: guidanceBell.ownerComputerId is not configured")
+        return false
+    end
+
+    if ownerComputerId ~= os.getComputerID() then
+        bell.enabled = false
+        log.info(("Guidance bell delegated to computer %d."):format(ownerComputerId))
+        return false
+    end
+
+    log.info(("Guidance bell owner: computer %d."):format(ownerComputerId))
+    return true
+end
+
+-- function: Return whether one rednet message is a remote request for this shared speaker set.
+local function isRemoteSharedPlaybackRequest(speakers, senderId, message, protocol)
+    local speaker = type(config.speaker) == "table" and config.speaker or nil
+    local shared = speaker and type(speaker.shared) == "table" and speaker.shared or nil
+
+    if not shared or shared.enabled ~= true or not speakers.sharedNetworkReady then
+        return false
+    end
+
+    if tonumber(senderId) == os.getComputerID() then
+        return false
+    end
+
+    if protocol ~= speakers.lockProtocol
+        or type(message) ~= "table"
+        or message.system ~= SHARED_LOCK_SYSTEM
+        or message.version ~= SHARED_LOCK_VERSION
+        or message.key ~= speakers.lockKey
+        or message.action ~= "request"
+    then
+        return false
+    end
+
+    return true
+end
+
+-- function: Interrupt only the local guidance bell when another computer requests normal playback.
+local function monitorRemoteGuidanceInterrupts(scheduler, player, speakers)
+    while true do
+        local _, senderId, message, protocol = os.pullEvent("rednet_message")
+
+        if isRemoteSharedPlaybackRequest(speakers, senderId, message, protocol)
+            and scheduler.currentRequestType == "guidance_bell"
+        then
+            player:interruptBelow(REMOTE_GUIDANCE_INTERRUPT_PRIORITY)
+        end
+    end
+end
+
 -- function: Start and run the railway announcement application.
 function app.run()
     log.info("Railway Announcement System starting.")
 
     local input = RailwayInput.new(config.input)
     local speakers = Speakers.connect(config.speaker, log)
+    local guidanceOwner = configureGuidanceBellOwner()
     local trackState = TrackState.new(config.state)
     local queue = Queue.new()
     local resolver = Segment.new(config, segmentDefinitions)
@@ -178,7 +252,18 @@ function app.run()
         departureTimingAdapter = adapter,
     })
 
-    scheduler:run()
+    if guidanceOwner and speakers.sharedNetworkReady then
+        parallel.waitForAll(
+            function()
+                scheduler:run()
+            end,
+            function()
+                monitorRemoteGuidanceInterrupts(scheduler, player, speakers)
+            end
+        )
+    else
+        scheduler:run()
+    end
 end
 
 return app
