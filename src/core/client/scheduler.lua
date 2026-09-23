@@ -17,7 +17,9 @@ local function playbackDurationSeconds(segments)
 
         if type(item) == "string" then
             path = item
-        elseif type(item) == "table" and item.kind == "audio" then
+        elseif type(item) == "table"
+            and (item.kind == "audio" or item.kind == "client_asset")
+        then
             path = item.path
         elseif type(item) == "table" and item.kind == "pause" and started then
             duration = duration + math.max(0, tonumber(item.seconds) or 0)
