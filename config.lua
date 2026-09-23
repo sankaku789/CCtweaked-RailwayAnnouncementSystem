@@ -63,16 +63,6 @@ return {
             baseUrl = "http://127.0.0.1:8888",
             dimension = 0,
 
-            -- Fallback train class IDs for routeNumber matching.
-            -- Keep more specific classes before less specific classes.
-            trainClasses = {
-                "special_rapid",
-                "semi_rapid",
-                "express",
-                "rapid",
-                "local",
-            },
-
             -- trackNumber is matched against the platform name at this station.
             stationName = "",
 
