@@ -83,8 +83,27 @@ function PlaybackServer:_bestIndex()
     return bestIndex
 end
 
+-- function: Remove a queued guidance bell superseded by normal work or policy.
+function PlaybackServer:_dropQueuedGuidanceBelow(priority)
+    priority = tonumber(priority) or 0
+
+    for index = #self.queue, 1, -1 do
+        local request = self.queue[index]
+        if request.internalGuidance == true and priority > priorityOf(request) then
+            table.remove(self.queue, index)
+            if self.guidance then
+                self.guidance:onPlaybackFinished(request, false, now())
+            end
+        end
+    end
+end
+
 -- function: Add one request to the authoritative queue.
 function PlaybackServer:_enqueue(request)
+    if request.internalGuidance ~= true then
+        self:_dropQueuedGuidanceBelow(priorityOf(request))
+    end
+
     self.sequence = self.sequence + 1
     request.serverSequence = self.sequence
     self.queue[#self.queue + 1] = request
@@ -175,6 +194,13 @@ function PlaybackServer:cancel(sourceId, requestId)
         return false
     end
 
+    local seenKey = ("%s:%s"):format(tostring(sourceId), requestId)
+    local seen = self.seen[seenKey]
+    if seen and seen.action ~= Protocol.ACTION.PLAY_ACCEPTED then
+        self:_reply(sourceId, seen.action, seen.payload or { requestId = requestId })
+        return true
+    end
+
     for index = #self.queue, 1, -1 do
         local request = self.queue[index]
         if request.sourceId == sourceId and request.requestId == requestId then
@@ -196,16 +222,42 @@ function PlaybackServer:cancel(sourceId, requestId)
         return true
     end
 
-    return false
+    local payload = {
+        requestId = requestId,
+        cancelledAt = now(),
+    }
+    self.seen[seenKey] = {
+        action = Protocol.ACTION.PLAY_CANCELLED,
+        payload = payload,
+    }
+    self:_reply(sourceId, Protocol.ACTION.PLAY_CANCELLED, payload)
+    return true
 end
 
 -- function: Interrupt a currently playing guidance bell when policy becomes blocked.
 function PlaybackServer:interruptGuidance()
+    local changed = false
+
+    for index = #self.queue, 1, -1 do
+        local request = self.queue[index]
+        if request.internalGuidance == true then
+            table.remove(self.queue, index)
+            changed = true
+            if self.guidance then
+                self.guidance:onPlaybackFinished(request, false, now())
+            end
+        end
+    end
+
     if self.current and self.current.internalGuidance == true then
         self.current.cancelRequested = true
-        return self.player:interrupt()
+        changed = self.player:interrupt() or changed
     end
-    return false
+
+    if changed then
+        os.queueEvent(Protocol.SERVER_QUEUE_EVENT)
+    end
+    return changed
 end
 
 -- function: Return whether no request is playing or waiting.
