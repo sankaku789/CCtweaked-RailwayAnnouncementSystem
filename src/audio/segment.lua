@@ -66,6 +66,54 @@ local function pathFromId(directory, value)
     return fs.combine(directory, tostring(value) .. ".dfpwm")
 end
 
+local function validClientAssetKey(value)
+    return type(value) == "string"
+        and value ~= ""
+        and value:match("^[%w_%-]+$") ~= nil
+end
+
+-- function: Return an optional Client-owned asset key declared by a segment definition.
+local function clientAssetKey(id, definition)
+    local value = definition.clientAsset
+
+    -- Compatibility for existing preserved segment files from before Client/Server
+    -- asset namespaces existed. Explicit false always disables this fallback.
+    if value == nil and id == "departure_melody" then
+        return id
+    end
+
+    if value == nil or value == false then
+        return nil
+    end
+    if value == true then
+        value = id
+    end
+    if not validClientAssetKey(value) then
+        error("invalid clientAsset key for segment: " .. tostring(id))
+    end
+    return value
+end
+
+-- function: Wrap one resolved local path as a Client-owned playback asset when requested.
+local function applyClientAsset(id, definition, paths)
+    local key = clientAssetKey(id, definition)
+    if not key then
+        return paths
+    end
+
+    if type(paths) ~= "table" or #paths ~= 1 or type(paths[1]) ~= "string" then
+        error("clientAsset segment must resolve to exactly one audio file: " .. tostring(id))
+    end
+
+    return {
+        {
+            kind = "client_asset",
+            key = key,
+            path = paths[1],
+        },
+    }
+end
+
 -- function: Create a semantic announcement segment resolver.
 function Segment.new(config, definitions)
     return setmetatable({
@@ -236,7 +284,7 @@ function Segment:_resolveDynamic(definition, context, requirePlayable)
     error("unknown dynamic segment resolver: " .. tostring(definition.resolver))
 end
 
--- function: Resolve a semantic segment ID into one or more audio file paths.
+-- function: Resolve a semantic segment ID into one or more audio playback items.
 function Segment:resolve(id, context, requirePlayable)
     local definition = self.definitions[id]
     if type(definition) == "string" then
@@ -265,6 +313,9 @@ function Segment:resolve(id, context, requirePlayable)
         error("segment definition must configure exactly one of path or resolver: " .. tostring(id))
     end
 
+    local paths = nil
+    local reason = nil
+
     if hasPath then
         if type(definition.path) ~= "string" or definition.path == "" then
             error("segment file path is not configured: " .. tostring(id))
@@ -274,10 +325,15 @@ function Segment:resolve(id, context, requirePlayable)
             return nil, "missing audio: " .. definition.path
         end
 
-        return { definition.path }
+        paths = { definition.path }
+    else
+        paths, reason = self:_resolveDynamic(definition, context, requirePlayable)
+        if not paths then
+            return nil, reason
+        end
     end
 
-    return self:_resolveDynamic(definition, context, requirePlayable)
+    return applyClientAsset(id, definition, paths)
 end
 
 return Segment
