@@ -5,6 +5,7 @@ local function now()
 end
 
 local originalNew = Scheduler.new
+local originalScheduleGuidanceFrom = Scheduler._scheduleGuidanceFrom
 local originalGuidanceDue = Scheduler._guidanceDue
 local originalComposeRequest = Scheduler._composeRequest
 local originalHandleApproach = Scheduler._handleApproach
@@ -53,6 +54,16 @@ function Scheduler:_localGuidanceConstrained()
     local resumeAt = tonumber(self.sharedGuidanceResumeAt)
     return self.sharedGuidanceHold == true
         or (resumeAt ~= nil and resumeAt > now())
+end
+
+-- function: Do not create estimated bell deadlines while an exact completion is pending.
+function Scheduler:_scheduleGuidanceFrom(baseEpoch, delaySeconds, reason)
+    if self.sharedGuidanceHold == true then
+        self.guidanceNextAt = nil
+        return
+    end
+
+    return originalScheduleGuidanceFrom(self, baseEpoch, delaySeconds, reason)
 end
 
 -- function: Start a local policy hold and clear any precomputed resume deadline.
@@ -144,8 +155,8 @@ function Scheduler:_handleDeparture()
     self:_beginSharedGuidanceHold()
     local result = originalHandleDeparture(self)
 
-    -- The base scheduler computes an event/dwell-based estimate. Shared guidance
-    -- uses the actual playback completion instead, so keep the hard hold active.
+    -- The base scheduler also calculates an event/dwell-based shared deadline.
+    -- Discard that estimate and keep the hard hold until actual playback end.
     self.sharedGuidanceResumeAt = nil
     if self.guidanceAvailable then
         self:_resetGuidanceCycle()
