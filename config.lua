@@ -39,8 +39,9 @@ return {
             protocol = "railway_announcement_speaker_fcfs",
             arbitrationWindowSeconds = 0.2,
             retrySeconds = 0.25,
-            -- Releases a stale lock when the owning computer disappears.
-            leaseMs = 300000,
+            -- Release dead owners/waiters quickly; active playback refreshes its lease.
+            leaseMs = 5000,
+            requestLeaseMs = 5000,
         },
     },
 
