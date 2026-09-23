@@ -358,8 +358,7 @@ function PlaybackServer:_processQueue()
                         }
                         self:_reply(request.sourceId, Protocol.ACTION.PLAY_STARTED, payload)
                     end
-                end,
-                request.label
+                end
             )
         end)
 
@@ -411,16 +410,17 @@ function PlaybackServer:observeClientPresence(clientId, payload)
         return
     end
 
-    self.guidance:touchClient(clientId)
+    local instanceId = type(payload) == "table" and payload.instanceId or nil
+    self.guidance:touchClient(clientId, instanceId)
     if type(payload) == "table" and type(payload.guidanceState) == "table" then
-        self.guidance:updateClient(clientId, payload.guidanceState)
+        self.guidance:updateClient(clientId, payload.guidanceState, instanceId)
     end
 end
 
 -- function: Apply an explicit client guidance state packet.
-function PlaybackServer:observeGuidanceState(clientId, state)
+function PlaybackServer:observeGuidanceState(clientId, state, instanceId)
     if self.guidance then
-        self.guidance:updateClient(clientId, state)
+        self.guidance:updateClient(clientId, state, instanceId)
     end
 end
 
@@ -437,7 +437,7 @@ function PlaybackServer:_monitorNetwork()
             elseif message.action == Protocol.ACTION.PLAY_CANCEL then
                 self:cancel(senderId, payload.requestId)
             elseif message.action == Protocol.ACTION.GUIDANCE_STATE then
-                self:observeGuidanceState(senderId, payload)
+                self:observeGuidanceState(senderId, payload, message.instanceId)
             elseif message.action == Protocol.ACTION.CLIENT_PRESENCE then
                 self:observeClientPresence(senderId, payload)
             end
