@@ -46,14 +46,15 @@ function PlaybackClient:_prepareSegments(segments)
 
             local assetKey = item.key
             local path = item.path
-            local ok, reason = self.assets:sync(assetKey, path)
+            local ok, transportKeyOrReason = self.assets:sync(assetKey, path)
             if not ok then
-                return nil, reason or ("Client asset synchronization failed: " .. tostring(assetKey))
+                return nil, transportKeyOrReason
+                    or ("Client asset synchronization failed: " .. tostring(assetKey))
             end
 
             prepared[index] = {
                 kind = "client_asset",
-                key = assetKey,
+                key = transportKeyOrReason,
             }
         else
             prepared[index] = item
