@@ -18,11 +18,13 @@ local RUNTIME_FILES = {
     "src/core/announcement_queue.lua",
     "src/core/composer.lua",
     "src/core/scheduler.lua",
+    "src/core/shared_guidance.lua",
     "src/core/track_state.lua",
 
     "src/hardware/railway_input.lua",
     "src/hardware/redstone_input.lua",
     "src/hardware/speakers.lua",
+    "src/hardware/shared_speakers.lua",
 
     "src/metadata/cache.lua",
     "src/metadata/provider.lua",
