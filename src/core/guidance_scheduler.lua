@@ -5,7 +5,6 @@ local function now()
 end
 
 local originalNew = Scheduler.new
-local originalNotifySharedTrackState = Scheduler._notifySharedTrackState
 local originalGuidanceDue = Scheduler._guidanceDue
 local originalComposeRequest = Scheduler._composeRequest
 local originalHandleApproach = Scheduler._handleApproach
@@ -121,13 +120,11 @@ function Scheduler:_guidanceDue()
     return originalGuidanceDue(self)
 end
 
--- function: Start post-playback holds before normal playback enters shared FCFS.
+-- function: Start a next-train hold before normal playback enters shared FCFS.
 function Scheduler:_composeRequest(request, metadata)
     local segments, diagnostics = originalComposeRequest(self, request, metadata)
 
-    if #segments > 0
-        and (request.type == "next_train" or request.type == "passing")
-    then
+    if #segments > 0 and request.type == "next_train" then
         self:_beginSharedGuidanceHold()
         request.sharedGuidanceHoldStarted = true
     end
@@ -165,7 +162,7 @@ function Scheduler:_handleReset()
     return originalHandleReset(self)
 end
 
--- function: Rebase post-announcement guidance timing on the actual playback end.
+-- function: Rebase departure/next-train guidance timing on the actual playback end.
 function Scheduler:_afterRequest(request, completed, hadSegments)
     originalAfterRequest(self, request, completed, hadSegments)
 
@@ -181,14 +178,6 @@ function Scheduler:_afterRequest(request, completed, hadSegments)
         self:_completeSharedGuidanceHold(
             self.guidanceConfig.initialDelaySeconds,
             "next_train complete+initial"
-        )
-        return
-    end
-
-    if request.type == "passing" and request.sharedGuidanceHoldStarted then
-        self:_completeSharedGuidanceHold(
-            self.guidanceConfig.intervalSeconds,
-            "passing complete+interval"
         )
     end
 end
