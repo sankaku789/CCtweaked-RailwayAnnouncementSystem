@@ -116,6 +116,25 @@ function Coordinator:_receiveUntil(deadline)
     end
 end
 
+-- function: Return one valid server presence whose sender owns the advertised ID.
+function Coordinator:_serverPresence(senderId, message, expectedServerId)
+    if message.action ~= Protocol.ACTION.SERVER_PRESENCE then
+        return nil, nil
+    end
+
+    local advertisedId = tonumber((message.payload or {}).serverId) or tonumber(senderId)
+    senderId = tonumber(senderId)
+    if not senderId or advertisedId ~= senderId then
+        return nil, nil
+    end
+
+    if expectedServerId ~= nil and advertisedId ~= tonumber(expectedServerId) then
+        return nil, nil
+    end
+
+    return advertisedId, message.instanceId
+end
+
 -- function: Discover a specific server or any existing server during startup.
 function Coordinator:_discover(expectedServerId)
     Protocol.broadcast(
@@ -133,11 +152,13 @@ function Coordinator:_discover(expectedServerId)
             break
         end
 
-        if message.action == Protocol.ACTION.SERVER_PRESENCE then
-            local advertisedId = tonumber((message.payload or {}).serverId) or senderId
-            if expectedServerId == nil or advertisedId == tonumber(expectedServerId) then
-                return advertisedId, message.instanceId
-            end
+        local serverId, serverInstanceId = self:_serverPresence(
+            senderId,
+            message,
+            expectedServerId
+        )
+        if serverId then
+            return serverId, serverInstanceId
         end
     end
 
@@ -165,8 +186,9 @@ function Coordinator:_claimServer()
                 break
             end
 
-            if message.action == Protocol.ACTION.SERVER_PRESENCE then
-                return tonumber((message.payload or {}).serverId) or senderId, message.instanceId
+            local serverId, serverInstanceId = self:_serverPresence(senderId, message, nil)
+            if serverId then
+                return serverId, serverInstanceId
             end
 
             if message.action == Protocol.ACTION.SERVER_CLAIM then
@@ -186,8 +208,9 @@ function Coordinator:initialize()
     local boundServerId = self:_loadBinding()
     self.networkReady = Protocol.openNetwork(self.logger)
 
-    -- A modemless installation can only be a local C/S system. This keeps the
-    -- single-computer path unified without weakening an existing remote binding.
+    -- Without a modem the only safe runtime is local C/S. Do not create a new
+    -- persistent binding here: if networking is added later, normal discovery
+    -- and election must still run instead of preserving an accidental split-brain.
     if not self.networkReady then
         if boundServerId and boundServerId ~= self.computerId then
             self:_reboot(("Bound announcement server %s requires network; rebooting"):format(
@@ -199,9 +222,6 @@ function Coordinator:initialize()
         self.serverInstanceId = self.instanceId
         self.isServer = true
         self.lastServerSeenAt = now()
-        if boundServerId == nil then
-            self:_saveBinding(self.computerId)
-        end
 
         if self.logger then
             self.logger.info("No modem available; using local Client/Server transport.")
@@ -366,15 +386,16 @@ function Coordinator:_monitorNetwork()
                     { serverId = self.computerId },
                     self.instanceId
                 )
-            elseif not self.isServer
-                and message.action == Protocol.ACTION.SERVER_PRESENCE
-                and senderId == self.serverId
-            then
-                local advertisedId = tonumber((message.payload or {}).serverId) or senderId
-                if advertisedId == self.serverId then
+            elseif not self.isServer and senderId == self.serverId then
+                local advertisedId, advertisedInstanceId = self:_serverPresence(
+                    senderId,
+                    message,
+                    self.serverId
+                )
+                if advertisedId then
                     if self.serverInstanceId
-                        and message.instanceId
-                        and message.instanceId ~= self.serverInstanceId
+                        and advertisedInstanceId
+                        and advertisedInstanceId ~= self.serverInstanceId
                     then
                         self:_reboot(("Bound announcement server %s restarted; rebooting"):format(
                             tostring(self.serverId)
@@ -382,7 +403,7 @@ function Coordinator:_monitorNetwork()
                     end
 
                     if self.serverInstanceId == nil then
-                        self.serverInstanceId = message.instanceId
+                        self.serverInstanceId = advertisedInstanceId
                     end
                     self.lastServerSeenAt = now()
                 end
