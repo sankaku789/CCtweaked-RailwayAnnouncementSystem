@@ -91,7 +91,7 @@ local function parseEntry(entry)
         return {
             kind = "pause",
             seconds = seconds,
-        }
+        },
     end
 
     local optional = entry:sub(1, 1) == "?"
@@ -313,6 +313,13 @@ end
 
 -- function: Compose audio and pause items for an announcement request and report failed resolutions.
 function Composer:compose(request, metadata)
+    if request.type == "next_train"
+        and type(metadata) == "table"
+        and metadata.terminating == true
+    then
+        return {}, { "next train is out of service" }
+    end
+
     local patternName = self:_patternName(request, metadata)
     local pattern = self.patterns[patternName]
     if type(pattern) ~= "table" then
