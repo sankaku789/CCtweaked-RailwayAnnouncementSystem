@@ -477,9 +477,10 @@ function MtrAdapter:getMetadata(context)
         return nil
     end
 
-    -- routeName is the authoritative MTR-provided train type/name. Older or
-    -- incomplete API responses fall back to configured route-number matching.
-    local classId = normalizeAssetId(arrival.routeName)
+    -- Train class always comes from routeNumber. Prefer the existing MTR
+    -- English-part normalization; fall back to configured matching only when
+    -- routeNumber cannot be normalized directly.
+    local classId = normalizeAssetId(arrival.routeNumber)
     if not classId then
         classId = classIdFromRouteNumber(arrival.routeNumber, self.trainClassIds)
     end
