@@ -288,7 +288,7 @@ function Player:_playGuidance(segments, onAudioStarted)
 end
 
 -- function: Play an ordered list of audio and pause items at one announcement priority.
-function Player:playSegments(segments, priority, onAudioStarted)
+function Player:playSegments(segments, priority, onAudioStarted, announcementType)
     self.currentPriority = tonumber(priority) or 0
     self.interruptRequested = false
     self.playbackAcquired = false
@@ -297,7 +297,7 @@ function Player:playSegments(segments, priority, onAudioStarted)
     local isGuidance = self:_isGuidancePlayback(segments, self.currentPriority)
     if isGuidance then
         -- Guidance ownership is separate from normal FCFS. Only the elected
-        -- owner plays it, and remote normal requests interrupt it via app.lua.
+        -- owner plays it, and shared guidance coordination may interrupt it.
         local completed = self:_playGuidance(segments, onAudioStarted)
         self.guidancePlaybackActive = false
         self.currentPriority = nil
@@ -305,7 +305,7 @@ function Player:playSegments(segments, priority, onAudioStarted)
         return completed
     end
 
-    local acquired = self.speakers:acquirePlayback(INTERRUPT_EVENT)
+    local acquired = self.speakers:acquirePlayback(INTERRUPT_EVENT, announcementType)
     if not acquired or self.interruptRequested then
         self.currentPriority = nil
         self.interruptRequested = false
