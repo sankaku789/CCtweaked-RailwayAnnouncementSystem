@@ -6,6 +6,7 @@ local DFPWM_BYTES_PER_SECOND = 6000
 local DEFAULT_GUIDANCE_PATH = "audio/guidance/bell.dfpwm"
 local DEFAULT_GUIDANCE_INTERVAL_SECONDS = 10
 local DEFAULT_GUIDANCE_PRIORITY = -1
+local REMOTE_GUIDANCE_INTERRUPT_PRIORITY = 0
 
 -- function: Return the current UTC epoch time in milliseconds.
 local function now()
@@ -66,6 +67,7 @@ function Scheduler.new(options)
     options.guidanceNextAt = nil
     options.guidanceGeneration = 0
     options.guidanceDurationSeconds = nil
+    options.remoteGuidanceBlocked = false
 
     return setmetatable(options, Scheduler)
 end
@@ -143,6 +145,49 @@ function Scheduler:_resetGuidanceCycle()
     self.guidanceQueued = false
 end
 
+-- function: Notify the shared coordinator about this computer's local track state.
+function Scheduler:_notifySharedTrackState(state)
+    if type(self.sharedTrackNotifier) ~= "function" then
+        return
+    end
+
+    local ok, err = pcall(self.sharedTrackNotifier, state)
+    if not ok and self.logger then
+        self.logger.warn("Shared track-state notification failed: " .. tostring(err))
+    end
+end
+
+-- function: Suppress only guidance-bell scheduling while a remote platform is occupied.
+function Scheduler:setRemoteGuidanceBlocked(blocked)
+    blocked = blocked == true
+    if self.remoteGuidanceBlocked == blocked then
+        return
+    end
+
+    self.remoteGuidanceBlocked = blocked
+
+    if blocked then
+        self:_resetGuidanceCycle()
+        if self.currentRequestType == "guidance_bell" then
+            self.player:interruptBelow(REMOTE_GUIDANCE_INTERRUPT_PRIORITY)
+        end
+
+        if self.logger then
+            self.logger.event("Guidance", "remote platform occupied")
+        end
+        return
+    end
+
+    if self.guidanceAvailable and self.trackState:get() ~= "PLATFORM" then
+        self:_resetGuidanceCycle()
+        self:_scheduleGuidance(self.guidanceConfig.initialDelaySeconds, "remote departure initial")
+    end
+
+    if self.logger then
+        self.logger.event("Guidance", "remote platform cleared")
+    end
+end
+
 -- function: Initialize guidance bell scheduling.
 function Scheduler:_initializeGuidance()
     self.guidanceConfig = self:_readGuidanceConfig()
@@ -173,6 +218,7 @@ end
 -- function: Return whether a guidance request may be queued now.
 function Scheduler:_guidanceDue()
     return self.guidanceAvailable
+        and not self.remoteGuidanceBlocked
         and self.trackState:get() ~= "PLATFORM"
         and not self.guidanceQueued
         and self.currentRequestType == nil
@@ -350,6 +396,7 @@ end
 -- function: Handle an APPROACH pulse and enable the PLATFORM periodic announcement mode.
 function Scheduler:_handleApproach()
     self.trackState:set("PLATFORM")
+    self:_notifySharedTrackState("PLATFORM")
     self:_resetGuidanceCycle()
 
     if self.logger then
@@ -364,6 +411,7 @@ end
 function Scheduler:_handleDeparture()
     local departureAt = now()
     self.trackState:set("IDLE")
+    self:_notifySharedTrackState("IDLE")
 
     if self.guidanceAvailable then
         self:_resetGuidanceCycle()
@@ -412,6 +460,7 @@ end
 -- function: Handle the direct reset button and enable the IDLE periodic announcement mode.
 function Scheduler:_handleReset()
     self.trackState:set("IDLE")
+    self:_notifySharedTrackState("IDLE")
     self:_invalidateMetadata()
 
     local priority = self:_preemptPriority()
@@ -520,6 +569,7 @@ end
 function Scheduler:_composeRequest(request, metadata)
     if request.type == "guidance_bell" then
         if not self.guidanceAvailable
+            or self.remoteGuidanceBlocked
             or self.trackState:get() == "PLATFORM"
             or request.guidanceGeneration ~= self.guidanceGeneration
         then
@@ -542,7 +592,7 @@ function Scheduler:_afterRequest(request, completed, hadSegments)
             return
         end
 
-        if self.trackState:get() == "PLATFORM" then
+        if self.remoteGuidanceBlocked or self.trackState:get() == "PLATFORM" then
             self.guidanceNextAt = nil
             return
         end
@@ -565,7 +615,7 @@ function Scheduler:_afterRequest(request, completed, hadSegments)
         return
     end
 
-    if self.trackState:get() == "PLATFORM" then
+    if self.remoteGuidanceBlocked or self.trackState:get() == "PLATFORM" then
         self.guidanceNextAt = nil
         return
     end
