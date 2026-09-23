@@ -63,27 +63,52 @@ function GuidanceServer:setPlaybackServer(server)
     self.playbackServer = server
 end
 
--- function: Refresh one client's lease without changing its guidance revision.
-function GuidanceServer:touchClient(clientId)
+-- function: Create fresh per-client state for one boot instance.
+function GuidanceServer:_newClientState(instanceId)
+    return {
+        instanceId = instanceId,
+        revision = -1,
+        blocked = false,
+        resumeAt = nil,
+        lastSeen = now(),
+    }
+end
+
+-- function: Refresh one client's lease and reset revision history after a client reboot.
+function GuidanceServer:touchClient(clientId, instanceId)
     clientId = tonumber(clientId)
     if not clientId then
-        return
+        return nil
     end
 
     local state = self.clients[clientId]
-    if not state then
-        state = {
-            revision = -1,
-            blocked = false,
-            resumeAt = nil,
-        }
+    local changedInstance = state
+        and instanceId ~= nil
+        and state.instanceId ~= nil
+        and tostring(instanceId) ~= tostring(state.instanceId)
+
+    if not state or changedInstance then
+        local removedConstraint = state
+            and (state.blocked == true
+                or (tonumber(state.resumeAt) ~= nil and tonumber(state.resumeAt) > now()))
+        state = self:_newClientState(instanceId)
         self.clients[clientId] = state
+
+        if removedConstraint and self.nextBellAt == nil then
+            self.nextBellAt = now() + (self.initialDelaySeconds * 1000)
+        end
+    else
+        if state.instanceId == nil and instanceId ~= nil then
+            state.instanceId = instanceId
+        end
+        state.lastSeen = now()
     end
-    state.lastSeen = now()
+
+    return state
 end
 
 -- function: Apply one revisioned guidance state from a client.
-function GuidanceServer:updateClient(clientId, incoming)
+function GuidanceServer:updateClient(clientId, incoming, instanceId)
     clientId = tonumber(clientId)
     if not clientId or type(incoming) ~= "table" then
         return false
@@ -94,7 +119,7 @@ function GuidanceServer:updateClient(clientId, incoming)
         return false
     end
 
-    local state = self.clients[clientId]
+    local state = self:touchClient(clientId, instanceId)
     if state and revision < (tonumber(state.revision) or -1) then
         state.lastSeen = now()
         return false
@@ -110,6 +135,7 @@ function GuidanceServer:updateClient(clientId, incoming)
     end
 
     self.clients[clientId] = {
+        instanceId = instanceId or (state and state.instanceId) or nil,
         revision = revision,
         blocked = blocked,
         resumeAt = resumeAt,
