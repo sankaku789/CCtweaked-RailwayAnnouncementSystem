@@ -15,8 +15,8 @@ local Player = require("audio.player")
 local GuidanceBell = require("audio.guidance_bell")
 local Cache = require("metadata.cache")
 local MetadataProvider = require("metadata.provider")
-local Scheduler = require("core.scheduler")
-local SharedGuidance = require("core.shared_guidance")
+local Scheduler = require("core.guidance_scheduler")
+local SharedGuidance = require("core.shared_guidance_policy")
 
 local app = {}
 
@@ -188,8 +188,8 @@ function app.run()
     })
 
     if sharedGuidance:isEnabled() then
-        scheduler.sharedTrackNotifier = function(state, guidanceResumeAt)
-            sharedGuidance:notifyTrackState(state, guidanceResumeAt)
+        scheduler.sharedTrackNotifier = function(state, guidanceResumeAt, guidanceHold)
+            sharedGuidance:notifyTrackState(state, guidanceResumeAt, guidanceHold)
         end
 
         parallel.waitForAll(
