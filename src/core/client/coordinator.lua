@@ -33,6 +33,7 @@ function Coordinator.new(config, logger)
         computerId = computerId,
         instanceId = ("%s:%s"):format(tostring(computerId), tostring(now())),
         serverId = nil,
+        serverInstanceId = nil,
         isServer = false,
         lastServerSeenAt = nil,
         localServer = nil,
@@ -125,7 +126,6 @@ function Coordinator:_discover(expectedServerId)
     )
 
     local deadline = now() + (DISCOVERY_SECONDS * 1000)
-    local selected = nil
 
     while now() < deadline do
         local senderId, message = self:_receiveUntil(deadline)
@@ -136,13 +136,12 @@ function Coordinator:_discover(expectedServerId)
         if message.action == Protocol.ACTION.SERVER_PRESENCE then
             local advertisedId = tonumber((message.payload or {}).serverId) or senderId
             if expectedServerId == nil or advertisedId == tonumber(expectedServerId) then
-                selected = advertisedId
-                break
+                return advertisedId, message.instanceId
             end
         end
     end
 
-    return selected
+    return nil, nil
 end
 
 -- function: Elect one server on first boot using a deterministic computer-ID tie-break.
@@ -167,7 +166,7 @@ function Coordinator:_claimServer()
             end
 
             if message.action == Protocol.ACTION.SERVER_PRESENCE then
-                return tonumber((message.payload or {}).serverId) or senderId
+                return tonumber((message.payload or {}).serverId) or senderId, message.instanceId
             end
 
             if message.action == Protocol.ACTION.SERVER_CLAIM then
@@ -179,7 +178,7 @@ function Coordinator:_claimServer()
         end
     end
 
-    return winner
+    return winner, winner == self.computerId and self.instanceId or nil
 end
 
 -- function: Resolve this computer's fixed server binding for the current boot.
@@ -197,6 +196,7 @@ function Coordinator:initialize()
         end
 
         self.serverId = self.computerId
+        self.serverInstanceId = self.instanceId
         self.isServer = true
         self.lastServerSeenAt = now()
         if boundServerId == nil then
@@ -214,6 +214,7 @@ function Coordinator:initialize()
         self.isServer = boundServerId == self.computerId
 
         if self.isServer then
+            self.serverInstanceId = self.instanceId
             self.lastServerSeenAt = now()
             if self.logger then
                 self.logger.info(("Announcement server binding restored: self (%s)"):format(
@@ -223,13 +224,14 @@ function Coordinator:initialize()
             return self
         end
 
-        local discovered = self:_discover(boundServerId)
+        local discovered, serverInstanceId = self:_discover(boundServerId)
         if discovered ~= boundServerId then
             self:_reboot(("Bound announcement server %s not found; rebooting"):format(
                 tostring(boundServerId)
             ))
         end
 
+        self.serverInstanceId = serverInstanceId
         self.lastServerSeenAt = now()
         if self.logger then
             self.logger.info(("Announcement server binding restored: %s"):format(
@@ -239,9 +241,10 @@ function Coordinator:initialize()
         return self
     end
 
-    local existing = self:_discover(nil)
+    local existing, serverInstanceId = self:_discover(nil)
     if existing then
         self.serverId = existing
+        self.serverInstanceId = serverInstanceId
         self.isServer = existing == self.computerId
         self.lastServerSeenAt = now()
         self:_saveBinding(existing)
@@ -254,8 +257,9 @@ function Coordinator:initialize()
         return self
     end
 
-    local winner = self:_claimServer()
+    local winner, winnerInstanceId = self:_claimServer()
     self.serverId = winner
+    self.serverInstanceId = winnerInstanceId
     self.isServer = winner == self.computerId
     self.lastServerSeenAt = now()
     self:_saveBinding(winner)
@@ -368,6 +372,18 @@ function Coordinator:_monitorNetwork()
             then
                 local advertisedId = tonumber((message.payload or {}).serverId) or senderId
                 if advertisedId == self.serverId then
+                    if self.serverInstanceId
+                        and message.instanceId
+                        and message.instanceId ~= self.serverInstanceId
+                    then
+                        self:_reboot(("Bound announcement server %s restarted; rebooting"):format(
+                            tostring(self.serverId)
+                        ))
+                    end
+
+                    if self.serverInstanceId == nil then
+                        self.serverInstanceId = message.instanceId
+                    end
                     self.lastServerSeenAt = now()
                 end
             end
