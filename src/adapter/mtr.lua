@@ -1,14 +1,6 @@
 local MtrAdapter = {}
 MtrAdapter.__index = MtrAdapter
 
-local TRAIN_CLASS_IDS = {
-    "special_rapid",
-    "semi_rapid",
-    "express",
-    "rapid",
-    "local",
-}
-
 -- function: Trim leading and trailing ASCII whitespace.
 local function trim(value)
     return value:match("^%s*(.-)%s*$")
@@ -103,8 +95,32 @@ local function normalizeAssetId(value)
     return normalized
 end
 
--- function: Resolve a known train class by matching its normalized name within the route number.
-local function classIdFromRouteNumber(value)
+-- function: Normalize configured fallback train class IDs.
+local function normalizeTrainClassIds(values)
+    local result = {}
+
+    if type(values) ~= "table" then
+        return result
+    end
+
+    for _, value in ipairs(values) do
+        if type(value) == "string" then
+            local normalized = value:lower()
+            normalized = normalized:gsub("[^a-z0-9]+", "_")
+            normalized = normalized:gsub("^_+", "")
+            normalized = normalized:gsub("_+$", "")
+
+            if normalized ~= "" then
+                result[#result + 1] = normalized
+            end
+        end
+    end
+
+    return result
+end
+
+-- function: Resolve a configured fallback train class by matching its normalized name within the route number.
+local function classIdFromRouteNumber(value, trainClassIds)
     if type(value) ~= "string" then
         return nil
     end
@@ -119,7 +135,7 @@ local function classIdFromRouteNumber(value)
     end
 
     local searchable = "_" .. normalized .. "_"
-    for _, classId in ipairs(TRAIN_CLASS_IDS) do
+    for _, classId in ipairs(trainClassIds or {}) do
         if searchable:find("_" .. classId .. "_", 1, true) then
             return classId
         end
@@ -214,6 +230,7 @@ function MtrAdapter.new(options)
         dimension = tonumber(cfg.dimension) or 0,
         platformIdHex = type(cfg.platformIdHex) == "string" and trim(cfg.platformIdHex) or "",
         stationName = type(cfg.stationName) == "string" and trim(cfg.stationName) or "",
+        trainClassIds = normalizeTrainClassIds(cfg.trainClasses),
         stationIdHex = nil,
     }, MtrAdapter)
 end
@@ -460,7 +477,13 @@ function MtrAdapter:getMetadata(context)
         return nil
     end
 
-    local classId = classIdFromRouteNumber(arrival.routeNumber)
+    -- routeName is the authoritative MTR-provided train type/name. Older or
+    -- incomplete API responses fall back to configured route-number matching.
+    local classId = normalizeAssetId(arrival.routeName)
+    if not classId then
+        classId = classIdFromRouteNumber(arrival.routeNumber, self.trainClassIds)
+    end
+
     local destinationId = normalizeAssetId(arrival.destination)
     local carCount = carCountFromArrival(arrival)
     local terminating = arrival.isTerminating == true
