@@ -68,6 +68,8 @@ function SharedGuidance.new(options)
                 guidanceCandidate = settings.candidate,
             },
         },
+        -- These maps are shared-guidance state only. They must never mutate the
+        -- scheduler's local TrackState for this computer/track.
         remotePlatforms = {},
         remoteBusy = {},
         remoteResumeAt = {},
