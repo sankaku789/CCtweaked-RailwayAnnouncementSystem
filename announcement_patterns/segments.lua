@@ -72,6 +72,10 @@ return {
         directory = "audio/melody",
         configPath = "announcement.melody.departurePath",
         defaultPath = "departure.dfpwm",
+        -- This file may have the same path on every Client while containing a
+        -- platform-specific melody. The Client synchronizes it to the Server
+        -- under this semantic asset key before playback.
+        clientAsset = true,
         enabled = {
             path = "announcement.melody.departureEnabled",
             default = true,
