@@ -21,6 +21,7 @@ function PlaybackClient.new(options)
         serverId = options.serverId,
         instanceId = options.instanceId,
         localServer = options.localServer,
+        assets = options.assets,
         logger = options.logger,
         requestSequence = 0,
         current = nil,
@@ -31,6 +32,35 @@ end
 function PlaybackClient:_nextRequestId()
     self.requestSequence = self.requestSequence + 1
     return ("%s:%s"):format(tostring(self.instanceId), tostring(self.requestSequence))
+end
+
+-- function: Synchronize Client-owned playback items and remove Client-local paths from the request.
+function PlaybackClient:_prepareSegments(segments)
+    local prepared = {}
+
+    for index, item in ipairs(segments or {}) do
+        if type(item) == "table" and item.kind == "client_asset" then
+            if not self.assets then
+                return nil, "Client asset synchronizer is not configured"
+            end
+
+            local assetKey = item.key
+            local path = item.path
+            local ok, reason = self.assets:sync(assetKey, path)
+            if not ok then
+                return nil, reason or ("Client asset synchronization failed: " .. tostring(assetKey))
+            end
+
+            prepared[index] = {
+                kind = "client_asset",
+                key = assetKey,
+            }
+        else
+            prepared[index] = item
+        end
+    end
+
+    return prepared
 end
 
 -- function: Submit one playback request through local or rednet transport.
@@ -151,13 +181,21 @@ end
 
 -- function: Submit one composed announcement and wait for its terminal lifecycle event.
 function PlaybackClient:playSegments(segments, priority, onAudioStarted, announcementType, expiresAt)
+    local preparedSegments, prepareError = self:_prepareSegments(segments)
+    if not preparedSegments then
+        if self.logger then
+            self.logger.warn("Playback asset preparation failed: " .. tostring(prepareError))
+        end
+        return false
+    end
+
     local requestId = self:_nextRequestId()
     local request = {
         requestId = requestId,
         priority = tonumber(priority) or 0,
         createdAt = os.epoch("utc"),
         expiresAt = tonumber(expiresAt),
-        segments = segments,
+        segments = preparedSegments,
         label = type(announcementType) == "string" and announcementType or nil,
     }
 
