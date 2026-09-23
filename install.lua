@@ -18,7 +18,9 @@ local RUNTIME_FILES = {
     "src/core/announcement_queue.lua",
     "src/core/composer.lua",
     "src/core/scheduler.lua",
+    "src/core/guidance_scheduler.lua",
     "src/core/shared_guidance.lua",
+    "src/core/shared_guidance_policy.lua",
     "src/core/track_state.lua",
 
     "src/hardware/railway_input.lua",
