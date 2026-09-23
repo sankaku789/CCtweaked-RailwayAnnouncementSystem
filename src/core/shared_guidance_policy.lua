@@ -126,9 +126,15 @@ function SharedGuidance:_applyLockMessage(computerId, message)
 
         -- New peers keep guidanceHold asserted until their actual playback end
         -- has been observed locally and an exact resumeAt is published. Retain
-        -- the older owner-side delay only as a rolling-upgrade fallback.
+        -- an owner-side delay only as a rolling-upgrade/message-loss fallback.
         if self.remoteHolds[computerId] ~= true then
-            local delayMs = self:_releaseDelayMs(announcementType)
+            local delayMs
+            if announcementType == "departure" then
+                delayMs = self.initialDelayMs
+            else
+                delayMs = self:_releaseDelayMs(announcementType)
+            end
+
             if delayMs > 0 then
                 self.remoteResumeAt[computerId] = laterEpoch(
                     self.remoteResumeAt[computerId],
