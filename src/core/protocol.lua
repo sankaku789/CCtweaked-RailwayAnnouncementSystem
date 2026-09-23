@@ -42,23 +42,14 @@ local function now()
     return os.epoch("utc")
 end
 
--- function: Return the configured logical speaker group without requiring a config migration.
+-- function: Return the configured logical speaker group, defaulting to one shared group.
 function Protocol.groupId(config)
     local speaker = type(config) == "table" and config.speaker or nil
-    if type(speaker) ~= "table" then
-        return "default"
-    end
-
-    if type(speaker.groupId) == "string" and speaker.groupId ~= "" then
-        return speaker.groupId
-    end
-
-    local shared = type(speaker.shared) == "table" and speaker.shared or nil
-    if type(shared) == "table"
-        and type(shared.protocol) == "string"
-        and shared.protocol ~= ""
+    if type(speaker) == "table"
+        and type(speaker.groupId) == "string"
+        and speaker.groupId ~= ""
     then
-        return shared.protocol
+        return speaker.groupId
     end
 
     return "default"
