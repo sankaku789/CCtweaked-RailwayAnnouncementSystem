@@ -61,7 +61,7 @@ return {
             baseUrl = "http://127.0.0.1:8888",
             dimension = 0,
 
-            -- Used only as a fallback when routeName is unavailable or invalid.
+            -- Fallback train class IDs for routeNumber matching.
             -- Keep more specific classes before less specific classes.
             trainClasses = {
                 "special_rapid",
