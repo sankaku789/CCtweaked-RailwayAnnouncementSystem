@@ -28,6 +28,8 @@ function Speakers:_broadcastLock(action)
 end
 
 -- function: Acquire normal-announcement FCFS while retaining its semantic type.
+-- When sharing is disabled the original implementation still returns immediately,
+-- so single-computer playback behavior is unchanged.
 function Speakers:acquirePlayback(interruptEventName, announcementType)
     self.sharedAnnouncementType = type(announcementType) == "string"
         and announcementType
