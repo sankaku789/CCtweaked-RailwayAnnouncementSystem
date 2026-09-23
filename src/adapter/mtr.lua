@@ -94,14 +94,13 @@ local function nameMatches(value, expected)
     return false
 end
 
--- function: Normalize an MTR ASCII name into a case-insensitive audio asset ID.
-local function normalizeAssetId(value)
-    local english = asciiName(value)
-    if not english then
+-- function: Normalize one printable ASCII name into a case-insensitive audio asset ID.
+local function normalizeAssetIdPart(value)
+    if not isPrintableAscii(value) then
         return nil
     end
 
-    local normalized = english:lower()
+    local normalized = value:lower()
     normalized = normalized:gsub("[^a-z0-9]+", "_")
     normalized = normalized:gsub("^_+", "")
     normalized = normalized:gsub("_+$", "")
@@ -113,54 +112,26 @@ local function normalizeAssetId(value)
     return normalized
 end
 
--- function: Normalize configured fallback train class IDs.
-local function normalizeTrainClassIds(values)
+-- function: Normalize every printable ASCII component of an MTR multilingual value.
+local function normalizeAssetIds(value)
     local result = {}
+    local seen = {}
 
-    if type(values) ~= "table" then
-        return result
-    end
-
-    for _, value in ipairs(values) do
-        if type(value) == "string" then
-            local normalized = value:lower()
-            normalized = normalized:gsub("[^a-z0-9]+", "_")
-            normalized = normalized:gsub("^_+", "")
-            normalized = normalized:gsub("_+$", "")
-
-            if normalized ~= "" then
-                result[#result + 1] = normalized
-            end
+    for _, part in ipairs(nameParts(value)) do
+        local normalized = normalizeAssetIdPart(part)
+        if normalized and not seen[normalized] then
+            seen[normalized] = true
+            result[#result + 1] = normalized
         end
     end
 
     return result
 end
 
--- function: Resolve a configured fallback train class by matching any ASCII route-number component.
-local function classIdFromRouteNumber(value, trainClassIds)
-    local selected = asciiName(value)
-    if not selected then
-        return nil
-    end
-
-    local normalized = selected:lower()
-    normalized = normalized:gsub("[^a-z0-9]+", "_")
-    normalized = normalized:gsub("^_+", "")
-    normalized = normalized:gsub("_+$", "")
-
-    if normalized == "" then
-        return nil
-    end
-
-    local searchable = "_" .. normalized .. "_"
-    for _, classId in ipairs(trainClassIds or {}) do
-        if searchable:find("_" .. classId .. "_", 1, true) then
-            return classId
-        end
-    end
-
-    return nil
+-- function: Normalize the first printable ASCII component for single-value metadata fields.
+local function normalizeAssetId(value)
+    local normalized = normalizeAssetIds(value)
+    return normalized[1]
 end
 
 -- function: Remove trailing slashes from the configured MTR API base URL.
@@ -249,7 +220,6 @@ function MtrAdapter.new(options)
         dimension = tonumber(cfg.dimension) or 0,
         platformIdHex = type(cfg.platformIdHex) == "string" and trim(cfg.platformIdHex) or "",
         stationName = type(cfg.stationName) == "string" and trim(cfg.stationName) or "",
-        trainClassIds = normalizeTrainClassIds(cfg.trainClasses),
         stationIdHex = nil,
     }, MtrAdapter)
 end
@@ -496,13 +466,10 @@ function MtrAdapter:getMetadata(context)
         return nil
     end
 
-    -- Train class comes from the printable ASCII component of routeNumber,
-    -- independent of whether Japanese or English is stored first.
-    local classId = normalizeAssetId(arrival.routeNumber)
-    if not classId then
-        classId = classIdFromRouteNumber(arrival.routeNumber, self.trainClassIds)
-    end
-
+    -- Keep every printable routeNumber component as a class audio candidate.
+    -- The segment resolver chooses the first candidate whose audio file exists.
+    local classCandidates = normalizeAssetIds(arrival.routeNumber)
+    local classId = classCandidates[1]
     local destinationId = normalizeAssetId(arrival.destination)
     local carCount = carCountFromArrival(arrival)
     local terminating = arrival.isTerminating == true
@@ -518,6 +485,7 @@ function MtrAdapter:getMetadata(context)
 
     return {
         class = classId,
+        classCandidates = classCandidates,
         destination = destinationId,
         carCount = carCount,
         terminating = terminating,
