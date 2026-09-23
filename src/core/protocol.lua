@@ -1,9 +1,10 @@
 local Protocol = {}
 
 Protocol.SYSTEM = "railway_announcement_cs"
-Protocol.VERSION = 2
-Protocol.REDNET_PROTOCOL = "railway_announcement_cs_v2"
+Protocol.VERSION = 3
+Protocol.REDNET_PROTOCOL = "railway_announcement_cs_v3"
 Protocol.PLAYBACK_EVENT = "railway_playback_response"
+Protocol.ASSET_EVENT = "railway_asset_response"
 Protocol.SERVER_QUEUE_EVENT = "railway_server_queue_changed"
 
 Protocol.ACTION = {
@@ -11,6 +12,17 @@ Protocol.ACTION = {
     SERVER_PRESENCE = "SERVER_PRESENCE",
     SERVER_CLAIM = "SERVER_CLAIM",
     CLIENT_PRESENCE = "CLIENT_PRESENCE",
+
+    ASSET_QUERY = "ASSET_QUERY",
+    ASSET_NEED = "ASSET_NEED",
+    ASSET_BEGIN = "ASSET_BEGIN",
+    ASSET_BEGIN_ACK = "ASSET_BEGIN_ACK",
+    ASSET_CHUNK = "ASSET_CHUNK",
+    ASSET_CHUNK_ACK = "ASSET_CHUNK_ACK",
+    ASSET_COMMIT = "ASSET_COMMIT",
+    ASSET_READY = "ASSET_READY",
+    ASSET_ERROR = "ASSET_ERROR",
+
     PLAY_REQUEST = "PLAY_REQUEST",
     PLAY_CANCEL = "PLAY_CANCEL",
     PLAY_ACCEPTED = "PLAY_ACCEPTED",
