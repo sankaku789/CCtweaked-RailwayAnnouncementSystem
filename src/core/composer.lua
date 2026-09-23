@@ -91,7 +91,7 @@ local function parseEntry(entry)
         return {
             kind = "pause",
             seconds = seconds,
-        },
+        }
     end
 
     local optional = entry:sub(1, 1) == "?"
