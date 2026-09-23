@@ -31,6 +31,17 @@ return {
     speaker = {
         volume = 3,
         reconnectDelay = 1,
+
+        -- Coordinate complete announcements between computers which can see the
+        -- same speaker peripherals. Local announcement priorities are unchanged.
+        shared = {
+            enabled = true,
+            protocol = "railway_announcement_speaker_fcfs",
+            arbitrationWindowSeconds = 0.2,
+            retrySeconds = 0.25,
+            -- Releases a stale lock when the owning computer disappears.
+            leaseMs = 300000,
+        },
     },
 
     guidanceBell = {
@@ -49,6 +60,16 @@ return {
         mtr = {
             baseUrl = "http://127.0.0.1:8888",
             dimension = 0,
+
+            -- Used only as a fallback when routeName is unavailable or invalid.
+            -- Keep more specific classes before less specific classes.
+            trainClasses = {
+                "special_rapid",
+                "semi_rapid",
+                "express",
+                "rapid",
+                "local",
+            },
 
             -- trackNumber is matched against the platform name at this station.
             stationName = "",
