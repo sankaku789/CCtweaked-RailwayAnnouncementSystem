@@ -28,6 +28,7 @@ function PlaybackServer.new(options)
         player = options.player,
         logger = options.logger,
         guidance = options.guidance,
+        assets = options.assets,
         groupId = options.groupId,
         instanceId = options.instanceId,
         queue = {},
@@ -172,13 +173,26 @@ function PlaybackServer:submit(sourceId, request)
         return true
     end
 
+    local resolvedSegments = request.segments
+    if self.assets then
+        local assetError
+        resolvedSegments, assetError = self.assets:resolveSegments(sourceId, request.segments)
+        if not resolvedSegments then
+            self:_reply(sourceId, Protocol.ACTION.PLAY_REJECTED, {
+                requestId = request.requestId,
+                reason = assetError,
+            })
+            return false
+        end
+    end
+
     local queued = {
         requestId = request.requestId,
         sourceId = sourceId,
         priority = tonumber(request.priority) or 0,
         createdAt = tonumber(request.createdAt) or now(),
         expiresAt = tonumber(request.expiresAt),
-        segments = request.segments,
+        segments = resolvedSegments,
         label = request.label,
         internalGuidance = false,
     }
@@ -451,7 +465,7 @@ function PlaybackServer:observeGuidanceState(clientId, state, instanceId)
     end
 end
 
--- function: Receive remote client playback and guidance traffic.
+-- function: Receive remote client playback, asset, and guidance traffic.
 function PlaybackServer:_monitorNetwork()
     while true do
         local _, senderId, message, protocol = os.pullEvent("rednet_message")
@@ -459,7 +473,9 @@ function PlaybackServer:_monitorNetwork()
             senderId = tonumber(senderId)
             local payload = message.payload or {}
 
-            if message.action == Protocol.ACTION.PLAY_REQUEST then
+            if self.assets and self.assets:handles(message.action) then
+                self.assets:handle(senderId, message.action, payload)
+            elseif message.action == Protocol.ACTION.PLAY_REQUEST then
                 self:submit(senderId, payload)
             elseif message.action == Protocol.ACTION.PLAY_CANCEL then
                 self:cancel(senderId, payload.requestId, payload.reason)
