@@ -34,7 +34,7 @@ return {
     },
 
     guidanceBell = {
-        enabled = true,
+        enabled = false,
         path = "audio/guidance/bell.dfpwm",
         initialDelaySeconds = 7,
         intervalSeconds = 1,
