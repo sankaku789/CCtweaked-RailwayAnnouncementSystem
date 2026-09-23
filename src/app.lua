@@ -244,11 +244,6 @@ function app.run()
     local resolver = Segment.new(config, segmentDefinitions)
     local composer = Composer.new(announcementPatterns, resolver, announcementComposites, routeOptions)
 
-    -- Static Client-owned assets are synchronized before the scheduler can emit
-    -- an announcement. PlaybackClient also synchronizes on demand so dynamic
-    -- clientAsset definitions remain supported.
-    syncStaticClientAssets(resolver, assetClient)
-
     local adapter = loadAdapter()
     local departureTiming = buildDepartureTiming(adapter, resolver)
     local cache = Cache.new(config.adapter.cacheTtlMs)
@@ -276,6 +271,10 @@ function app.run()
 
     local tasks = {
         function()
+            -- Do not start accepting railway input until static Client-owned audio
+            -- is known to the Server. Coordinator/server tasks run in parallel so
+            -- failure detection and incoming transfer handling remain live here.
+            syncStaticClientAssets(resolver, assetClient)
             scheduler:run()
         end,
         function()
