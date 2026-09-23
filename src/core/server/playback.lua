@@ -219,7 +219,7 @@ function PlaybackServer:submitInternal(request)
 end
 
 -- function: Cancel one queued or active request from its owning client.
-function PlaybackServer:cancel(sourceId, requestId)
+function PlaybackServer:cancel(sourceId, requestId, reason)
     self:_pruneSeen()
 
     sourceId = tonumber(sourceId)
@@ -242,6 +242,7 @@ function PlaybackServer:cancel(sourceId, requestId)
             self:_finishClientRequest(request, Protocol.ACTION.PLAY_CANCELLED, {
                 requestId = requestId,
                 cancelledAt = now(),
+                reason = reason,
             })
             return true
         end
@@ -252,6 +253,7 @@ function PlaybackServer:cancel(sourceId, requestId)
         and self.current.requestId == requestId
     then
         self.current.cancelRequested = true
+        self.current.superseded = reason == "superseded"
         self.player:interrupt()
         return true
     end
@@ -259,6 +261,7 @@ function PlaybackServer:cancel(sourceId, requestId)
     local payload = {
         requestId = requestId,
         cancelledAt = now(),
+        reason = reason,
     }
     self:_rememberSeen(seenKey, Protocol.ACTION.PLAY_CANCELLED, payload)
     self:_reply(sourceId, Protocol.ACTION.PLAY_CANCELLED, payload)
@@ -344,6 +347,7 @@ function PlaybackServer:_processQueue()
         local request = self:_waitNext()
         self.current = request
         request.cancelRequested = false
+        request.superseded = false
 
         if self.logger and not request.internalGuidance then
             self.logger.info(("Server playing: %s priority=%s source=%s"):format(
@@ -394,6 +398,13 @@ function PlaybackServer:_processQueue()
                     requestId = request.requestId,
                     startedAt = startedAt,
                     completedAt = completedAt,
+                })
+            elseif request.superseded then
+                self:_finishClientRequest(request, Protocol.ACTION.PLAY_INTERRUPTED, {
+                    requestId = request.requestId,
+                    startedAt = startedAt,
+                    interruptedAt = completedAt,
+                    reason = "superseded",
                 })
             elseif request.cancelRequested then
                 self:_finishClientRequest(request, Protocol.ACTION.PLAY_CANCELLED, {
@@ -451,7 +462,7 @@ function PlaybackServer:_monitorNetwork()
             if message.action == Protocol.ACTION.PLAY_REQUEST then
                 self:submit(senderId, payload)
             elseif message.action == Protocol.ACTION.PLAY_CANCEL then
-                self:cancel(senderId, payload.requestId)
+                self:cancel(senderId, payload.requestId, payload.reason)
             elseif message.action == Protocol.ACTION.GUIDANCE_STATE then
                 self:observeGuidanceState(senderId, payload, message.instanceId)
             elseif message.action == Protocol.ACTION.CLIENT_PRESENCE then
