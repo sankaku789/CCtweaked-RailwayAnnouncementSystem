@@ -6,7 +6,7 @@ local routeOptions = require("announcement_patterns.route_options")
 
 local log = require("util.log")
 local RailwayInput = require("hardware.railway_input")
-local Speakers = require("hardware.speakers")
+local Speakers = require("hardware.shared_speakers")
 local TrackState = require("core.track_state")
 local Queue = require("core.announcement_queue")
 local Segment = require("audio.segment")
