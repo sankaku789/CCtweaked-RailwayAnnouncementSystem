@@ -8,6 +8,28 @@ local originalAcquirePlayback = Speakers.acquirePlayback
 local originalReleasePlayback = Speakers.releasePlayback
 local originalStop = Speakers.stop
 
+-- function: Compare shared requests by priority, then FCFS timestamp, then computer ID.
+local function requestBefore(left, right)
+    if not right then
+        return true
+    end
+
+    local leftPriority = tonumber(left.priority) or 0
+    local rightPriority = tonumber(right.priority) or 0
+    if leftPriority ~= rightPriority then
+        return leftPriority > rightPriority
+    end
+
+    local leftAt = tonumber(left.requestedAt) or math.huge
+    local rightAt = tonumber(right.requestedAt) or math.huge
+    if leftAt ~= rightAt then
+        return leftAt < rightAt
+    end
+
+    return (tonumber(left.computerId) or math.huge)
+        < (tonumber(right.computerId) or math.huge)
+end
+
 -- function: Return the speaker list currently participating in this playback.
 local function playbackDevices(self)
     if type(self.degradedPlaybackDevices) == "table" and #self.degradedPlaybackDevices > 0 then
@@ -28,13 +50,26 @@ local function hasPlaybackDevice(devices, name)
     return false
 end
 
--- function: Broadcast the shared lock state with the active announcement type.
+-- function: Broadcast shared lock state with announcement type and queue priority.
 function Speakers:_broadcastLock(action)
     if not self:_ensureSharedNetwork() then
         return false
     end
 
     local request = self.lockRequest
+    if request and request.priority == nil then
+        request.priority = tonumber(self.sharedAnnouncementPriority) or 0
+    end
+
+    if self.lockOwner
+        and self.lockOwner.computerId == self.computerId
+        and self.lockOwner.priority == nil
+    then
+        self.lockOwner.priority = request and request.priority
+            or tonumber(self.sharedAnnouncementPriority)
+            or 0
+    end
+
     local message = {
         system = LOCK_SYSTEM,
         version = LOCK_VERSION,
@@ -43,32 +78,135 @@ function Speakers:_broadcastLock(action)
         computerId = self.computerId,
         requestedAt = request and request.requestedAt or nil,
         announcementType = self.sharedAnnouncementType,
+        priority = request and request.priority
+            or tonumber(self.sharedAnnouncementPriority)
+            or 0,
     }
 
     local ok = pcall(rednet.broadcast, message, self.lockProtocol)
     return ok
 end
 
--- function: Acquire normal-announcement FCFS while retaining its semantic type.
+-- function: Remember one pending shared request including its priority.
+function Speakers:_rememberRequest(computerId, requestedAt, priority)
+    computerId = tonumber(computerId)
+    requestedAt = tonumber(requestedAt)
+    if not computerId or not requestedAt then
+        return
+    end
+
+    self.lockRequests[computerId] = {
+        computerId = computerId,
+        requestedAt = requestedAt,
+        priority = tonumber(priority) or 0,
+        lastSeen = os.epoch("utc"),
+    }
+end
+
+-- function: Apply shared lock messages using priority first and FCFS as the tie-breaker.
+function Speakers:_handleLockMessage(senderId, message)
+    if type(message) ~= "table"
+        or message.system ~= LOCK_SYSTEM
+        or message.version ~= LOCK_VERSION
+        or message.key ~= self.lockKey
+    then
+        return
+    end
+
+    local computerId = tonumber(message.computerId) or tonumber(senderId)
+    if not computerId then
+        return
+    end
+
+    local action = message.action
+    if action == "request" then
+        self:_rememberRequest(computerId, message.requestedAt, message.priority)
+        return
+    end
+
+    if action == "cancel" then
+        self.lockRequests[computerId] = nil
+        return
+    end
+
+    if action == "release" then
+        self.lockRequests[computerId] = nil
+        if self.lockOwner and self.lockOwner.computerId == computerId then
+            self.lockOwner = nil
+        end
+        return
+    end
+
+    if action ~= "acquire" and action ~= "heartbeat" then
+        return
+    end
+
+    local requestedAt = tonumber(message.requestedAt)
+    if not requestedAt then
+        return
+    end
+
+    local priority = tonumber(message.priority) or 0
+    self:_rememberRequest(computerId, requestedAt, priority)
+
+    local candidate = {
+        computerId = computerId,
+        requestedAt = requestedAt,
+        priority = priority,
+        lastSeen = os.epoch("utc"),
+    }
+
+    if action == "heartbeat"
+        and self.lockOwner
+        and self.lockOwner.computerId == computerId
+    then
+        self.lockOwner.lastSeen = candidate.lastSeen
+        self.lockOwner.priority = priority
+        return
+    end
+
+    -- Acquire messages may race during the bounded arbitration window. Resolve
+    -- that race with priority/FCFS ordering. Once playback is established, a
+    -- later requester cannot acquire until the current owner releases.
+    if not self.lockOwner or requestBefore(candidate, self.lockOwner) then
+        self.lockOwner = candidate
+    end
+end
+
+-- function: Return the highest-priority pending request, FCFS within one priority.
+function Speakers:_earliestRequest()
+    local earliest = nil
+    for _, request in pairs(self.lockRequests) do
+        if requestBefore(request, earliest) then
+            earliest = request
+        end
+    end
+    return earliest
+end
+
+-- function: Acquire normal-announcement arbitration while retaining type and priority.
 -- When sharing is disabled the original implementation still returns immediately,
 -- so single-computer playback behavior is unchanged.
-function Speakers:acquirePlayback(interruptEventName, announcementType)
+function Speakers:acquirePlayback(interruptEventName, announcementType, priority)
     self.sharedAnnouncementType = type(announcementType) == "string"
         and announcementType
         or nil
+    self.sharedAnnouncementPriority = tonumber(priority) or 0
     self.degradedPlaybackDevices = nil
 
     local acquired = originalAcquirePlayback(self, interruptEventName)
     if not acquired then
         self.sharedAnnouncementType = nil
+        self.sharedAnnouncementPriority = nil
     end
     return acquired
 end
 
--- function: Release FCFS and clear per-playback degradation state after release is broadcast.
+-- function: Release arbitration and clear per-playback shared state.
 function Speakers:releasePlayback()
     originalReleasePlayback(self)
     self.sharedAnnouncementType = nil
+    self.sharedAnnouncementPriority = nil
     self.degradedPlaybackDevices = nil
 end
 
