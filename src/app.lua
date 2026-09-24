@@ -10,6 +10,7 @@ local Speakers = require("hardware.speakers")
 local TrackState = require("core.track_state")
 local Queue = require("core.announcement_queue")
 local Segment = require("audio.segment")
+local Timeline = require("audio.timeline")
 local Composer = require("core.composer")
 local Player = require("audio.player")
 local Cache = require("metadata.cache")
@@ -25,7 +26,6 @@ local GuidanceServer = require("core.server.guidance")
 
 local app = {}
 
-local DFPWM_BYTES_PER_SECOND = 6000
 local DEFAULT_DEPARTURE_END_LEAD_SECONDS = 3
 
 local function loadAdapter()
@@ -47,21 +47,6 @@ local function loadAdapter()
     return module
 end
 
-local function localAudioPath(item)
-    if type(item) == "string" then
-        return item
-    end
-
-    if type(item) == "table"
-        and (item.kind == "audio" or item.kind == "client_asset")
-        and type(item.path) == "string"
-    then
-        return item.path
-    end
-
-    return nil
-end
-
 local function departureDurationSeconds(composer)
     local ok, items, diagnostics = pcall(composer.compose, composer, {
         type = "departure",
@@ -71,19 +56,8 @@ local function departureDurationSeconds(composer)
         return nil, items
     end
 
-    local duration = 0
-    local started = false
-    for _, item in ipairs(items or {}) do
-        local path = localAudioPath(item)
-        if path and fs.exists(path) and not fs.isDir(path) then
-            started = true
-            duration = duration + (fs.getSize(path) / DFPWM_BYTES_PER_SECOND)
-        elseif type(item) == "table" and item.kind == "pause" and started then
-            duration = duration + math.max(0, tonumber(item.seconds) or 0)
-        end
-    end
-
-    if not started then
+    local duration = Timeline.durationSeconds(items)
+    if not duration then
         local reason = type(diagnostics) == "table" and diagnostics[1] or nil
         return nil, reason or "departure announcement did not resolve to playable audio"
     end
@@ -307,7 +281,5 @@ function app.run()
 
     parallel.waitForAll(table.unpack(tasks))
 end
-
-app._departureDurationSeconds = departureDurationSeconds
 
 return app
