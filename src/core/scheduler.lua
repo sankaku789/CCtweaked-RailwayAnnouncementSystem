@@ -319,7 +319,7 @@ function Scheduler:_invalidateMetadata()
     end
 end
 
--- function: Resolve the dwell and melody delay for the current departure event.
+-- function: Resolve the dwell and departure-announcement delay for the current departure event.
 function Scheduler:_resolveDepartureTiming()
     local timing = type(self.departureTiming) == "table" and self.departureTiming or {}
     local fallbackDelaySeconds = math.max(
@@ -360,11 +360,11 @@ function Scheduler:_resolveDepartureTiming()
         self.logger.warn("Dynamic departure timing is unavailable")
     end
 
-    local melodySeconds = tonumber(timing.melodySeconds)
+    local departureSeconds = tonumber(timing.departureSeconds) or tonumber(timing.melodySeconds)
     local leadSeconds = math.max(0, tonumber(timing.leadSeconds) or 0)
 
-    if dwellTimeMs and melodySeconds then
-        delaySeconds = math.max(0, (dwellTimeMs / 1000) - melodySeconds - leadSeconds)
+    if dwellTimeMs and departureSeconds then
+        delaySeconds = math.max(0, (dwellTimeMs / 1000) - departureSeconds - leadSeconds)
     else
         delaySeconds = fallbackDelaySeconds
     end
