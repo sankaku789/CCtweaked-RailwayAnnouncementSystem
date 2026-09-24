@@ -56,9 +56,9 @@ function Scheduler:_localGuidanceConstrained()
         or (resumeAt ~= nil and resumeAt > now())
 end
 
--- function: Do not create estimated bell deadlines while an exact completion is pending.
+-- function: Do not create estimated bell deadlines outside the normal IDLE state.
 function Scheduler:_scheduleGuidanceFrom(baseEpoch, delaySeconds, reason)
-    if self.sharedGuidanceHold == true then
+    if self.sharedGuidanceHold == true or self.trackState:get() ~= "IDLE" then
         self.guidanceNextAt = nil
         return
     end
@@ -96,7 +96,7 @@ function Scheduler:_completeSharedGuidanceHold(delaySeconds, reason)
         false
     )
 
-    if self.guidanceAvailable and self.trackState:get() ~= "PLATFORM" then
+    if self.guidanceAvailable and self.trackState:get() == "IDLE" then
         self:_resetGuidanceCycle()
         self:_scheduleGuidanceFrom(completedAt, delay, reason)
     end
@@ -113,7 +113,7 @@ function Scheduler:setRemoteGuidanceGate(blocked, resumeAt)
 
     local localResumeAt = tonumber(self.sharedGuidanceResumeAt)
     if self.guidanceAvailable
-        and self.trackState:get() ~= "PLATFORM"
+        and self.trackState:get() == "IDLE"
         and localResumeAt
         and localResumeAt > now()
         and (self.guidanceNextAt == nil or self.guidanceNextAt < localResumeAt)
@@ -122,9 +122,9 @@ function Scheduler:setRemoteGuidanceGate(blocked, resumeAt)
     end
 end
 
--- function: Apply the local hold/deadline in addition to the existing guidance checks.
+-- function: Apply the local hold/deadline and allow bells only in IDLE.
 function Scheduler:_guidanceDue()
-    if self:_localGuidanceConstrained() then
+    if self.trackState:get() ~= "IDLE" or self:_localGuidanceConstrained() then
         return false
     end
 
