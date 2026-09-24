@@ -145,24 +145,24 @@ end
 
 -- function: Preserve approach metadata only for later stopped-train announcements.
 function Scheduler:_metadataFor(request)
-    if request.type == "stopped_train" or request.type == "stopped" then
+    if request.type == "stopped_train" then
         if self.stoppedMetadata then
             return self.stoppedMetadata
         end
 
-        -- core.scheduler historically recognizes the announcement type as
-        -- "stopped". Keep that internal compatibility while exposing the
-        -- clearer public type "stopped_train".
-        local metadataRequest = request
-        if request.type == "stopped_train" then
-            metadataRequest = {}
-            for key, value in pairs(request) do
-                metadataRequest[key] = value
-            end
-            metadataRequest.type = "stopped"
+        local metadata = self.metadataProvider:get(request)
+        if metadata then
+            self.stoppedMetadata = metadata
+        end
+        return metadata
+    end
+
+    if request.type == "stopped" then
+        if self.stoppedMetadata then
+            return self.stoppedMetadata
         end
 
-        local metadata = originalMetadataFor(self, metadataRequest)
+        local metadata = originalMetadataFor(self, request)
         if metadata then
             self.stoppedMetadata = metadata
         end
