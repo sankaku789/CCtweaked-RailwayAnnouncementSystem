@@ -47,7 +47,9 @@ end
 
 -- function: Convert local railway policy into the server-facing guidance state.
 function GuidanceClient:updateFromTrack(state, resumeAt, hold)
-    local blocked = state == "PLATFORM" or hold == true
+    -- Guidance is allowed only in the normal IDLE state. APPROACH and PLATFORM
+    -- both suppress the bell, and any future non-IDLE state is safe by default.
+    local blocked = state ~= "IDLE" or hold == true
     resumeAt = tonumber(resumeAt)
 
     if blocked then
