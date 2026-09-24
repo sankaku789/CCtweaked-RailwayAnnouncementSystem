@@ -85,8 +85,9 @@ return {
 
         departure = {
             doorsClosingEnabled = false,
-            -- Seconds to leave between the end of the melody and scheduled departure.
-            melodyEndLeadSeconds = 5,
+            -- Seconds to leave between the end of the complete departure announcement
+            -- and the scheduled departure time.
+            departureEndLeadSeconds = 5,
         },
     },
 
