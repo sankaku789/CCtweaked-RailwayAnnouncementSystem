@@ -4,13 +4,14 @@ TrackState.__index = TrackState
 local states = {
     UNKNOWN = true,
     IDLE = true,
+    APPROACH = true,
     PLATFORM = true,
 }
 
--- function: Create a track state holder starting from UNKNOWN until an explicit pulse is observed.
+-- function: Create a track state holder starting in next-train/IDLE mode.
 function TrackState.new(_options)
     return setmetatable({
-        state = "UNKNOWN",
+        state = "IDLE",
     }, TrackState)
 end
 
