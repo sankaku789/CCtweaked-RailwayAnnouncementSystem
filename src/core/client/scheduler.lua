@@ -254,8 +254,8 @@ function Scheduler:_afterRequest(request, completed, hadSegments)
     end
 
     local guidance = self.guidanceConfig or self:_readGuidanceConfig()
-    local intervalSeconds = math.max(0, tonumber(guidance.intervalSeconds) or 0)
-    local resumeAt = now() + (intervalSeconds * 1000)
+    local initialDelaySeconds = math.max(0, tonumber(guidance.initialDelaySeconds) or 0)
+    local resumeAt = now() + (initialDelaySeconds * 1000)
     self.sharedGuidanceResumeAt = resumeAt
     self:_notifySharedTrackState(self.trackState:get(), resumeAt, false)
 end
