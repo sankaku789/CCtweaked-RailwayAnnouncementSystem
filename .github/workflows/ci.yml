@@ -36,3 +36,7 @@ jobs:
       - name: Test guidance state
         run: |
           lua5.2 tests/guidance_state_test.lua
+
+      - name: Test guidance server timing
+        run: |
+          lua5.2 tests/guidance_server_timing_test.lua
