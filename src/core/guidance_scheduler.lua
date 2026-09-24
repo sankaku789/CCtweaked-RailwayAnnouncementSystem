@@ -178,9 +178,11 @@ function Scheduler:_afterRequest(request, completed, hadSegments)
     originalAfterRequest(self, request, completed, hadSegments)
 
     if request.type == "departure" then
+        local timing = type(self.departureTiming) == "table" and self.departureTiming or {}
+        local leadSeconds = math.max(0, tonumber(timing.leadSeconds) or 0)
         self:_completeSharedGuidanceHold(
-            self.guidanceConfig.initialDelaySeconds,
-            "departure complete+initial"
+            leadSeconds + self.guidanceConfig.initialDelaySeconds,
+            "departure complete+lead+initial"
         )
         return
     end
