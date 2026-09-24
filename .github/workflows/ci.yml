@@ -32,3 +32,7 @@ jobs:
       - name: Test departure scheduler
         run: |
           lua5.2 tests/departure_scheduler_test.lua
+
+      - name: Test guidance state
+        run: |
+          lua5.2 tests/guidance_state_test.lua
