@@ -14,6 +14,7 @@ local RUNTIME_FILES = {
     "src/audio/guidance_bell.lua",
     "src/audio/player.lua",
     "src/audio/segment.lua",
+    "src/audio/timeline.lua",
 
     "src/core/announcement_queue.lua",
     "src/core/composer.lua",
