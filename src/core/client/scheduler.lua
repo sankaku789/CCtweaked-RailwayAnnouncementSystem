@@ -57,6 +57,17 @@ end
 function Scheduler:_handleApproach()
     self.stoppedMetadata = nil
 
+    -- TrackState starts as UNKNOWN after a cold boot. The first confirmed
+    -- approach establishes IDLE/next-train mode without starting stopped mode.
+    if self.trackState:get() == "UNKNOWN" then
+        self.trackState:set("IDLE")
+        self:_handleStateChange()
+
+        if self.logger then
+            self.logger.event("State", "IDLE (initial approach)")
+        end
+    end
+
     if self.logger then
         self.logger.event("Approach", "signal")
     end
