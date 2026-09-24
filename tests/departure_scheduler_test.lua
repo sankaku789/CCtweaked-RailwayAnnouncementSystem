@@ -97,9 +97,11 @@ end
 
 local metadataProvider = {
     invalidations = 0,
+    lastRequestType = nil,
 }
 
-function metadataProvider:get()
+function metadataProvider:get(request)
+    self.lastRequestType = request and request.type or nil
     return {
         class = "local",
         destination = "test",
@@ -119,14 +121,14 @@ local config = {
             approach = 2,
             passing = 2,
             departure = 3,
-            stopped = 1,
+            stopped_train = 1,
             next_train = 0,
         },
         ttlMs = {
             approach = 30000,
             passing = 30000,
             departure = 30000,
-            stopped = 10000,
+            stopped_train = 10000,
             next_train = 10000,
         },
     },
@@ -134,7 +136,7 @@ local config = {
         stopped = {
             enabled = true,
             state = "PLATFORM",
-            type = "stopped",
+            type = "stopped_train",
             initialDelayMs = 30000,
             intervalMs = 30000,
         },
@@ -191,7 +193,16 @@ assertEqual(trackState:get(), "PLATFORM", "departure reservation must enter PLAT
 assertEqual(scheduler.departureDueAt, 205000, "departure deadline")
 assertEqual(scheduler.periodicNextAt.nextTrain, nil, "next-train timer must stop on departure reservation")
 assertEqual(scheduler.periodicNextAt.stopped, 230000, "stopped timer must start on departure reservation")
+assertEqual(config.periodic.stopped.type, "stopped_train", "stopped periodic must use stopped_train announcement")
 assertEqual(findQueued(queue, "departure"), nil, "departure must not be queued before its deadline")
+
+scheduler.stoppedMetadata = nil
+local stoppedMetadata = scheduler:_metadataFor({
+    type = "stopped_train",
+    track = 1,
+})
+assertEqual(stoppedMetadata.class, "local", "stopped_train metadata must resolve")
+assertEqual(metadataProvider.lastRequestType, "stopped", "stopped_train must preserve legacy metadata lookup compatibility")
 
 fakeNow = 204999
 assertEqual(scheduler:_dispatchDepartureIfDue(fakeNow), false, "departure must wait until deadline")
