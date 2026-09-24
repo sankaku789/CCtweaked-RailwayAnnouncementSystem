@@ -51,23 +51,26 @@ APPROACH=ON   DEPARTURE=ON  -> 11 -> passing
 
 同じパルスを複数回処理しないよう、一度非0コードを受け付けた後は `00` に戻るまで再武装しません。
 
-TrackStateは即時イベントの種別判定には使わず、`stopped` / `next_train` の定期放送を選ぶためだけに使います。起動直後は `UNKNOWN` で、定期放送は実行しません。
+TrackStateは定期放送と盲導鈴の抑止状態を管理します。起動直後は `IDLE` です。
 
 ```text
-起動直後  -> UNKNOWN
-approach   -> PLATFORM
- departure -> IDLE
-passing    -> state変更なし
-reset      -> IDLE
+起動直後              -> IDLE
+approach               -> APPROACH
+departure予約          -> PLATFORM
+departure放送完了      -> IDLE
+passing                -> state変更なし
+reset                  -> IDLE
 ```
 
+定期放送は次の状態で有効になります。
+
 ```text
-UNKNOWN  -> periodicなし
-PLATFORM -> stopped
+APPROACH -> periodicなし
+PLATFORM -> stopped_train
 IDLE     -> next_train
 ```
 
-これによりapproachパルスを取りこぼしても、次のdepartureパルスをapproachとして誤認して以後の入力解釈がずれ続けることはありません。再起動直後も、状態が確定する前に `next_train` を流しません。
+接近から発車放送完了までは盲導鈴をholdし、発車放送完了後に設定された待ち時間を経て再開します。
 
 旧設定から更新する場合は `input.bundled.signals.next` / `passing` を `approach` / `departure` に変更し、passingセンサを両信号線へ接続してください。
 
@@ -76,6 +79,8 @@ IDLE     -> next_train
 `config.lua` のAdapterを `mtr` にすると、TSC HTTP APIから列車情報を取得します。
 
 ```lua
+trackNumber = 1,
+
 adapter = {
     module = "mtr",
     cacheTtlMs = 30000,
@@ -84,11 +89,12 @@ adapter = {
         baseUrl = "http://127.0.0.1:8888",
         dimension = 0,
         stationName = "Tomakomai",
-        platformName = "1",
         platformIdHex = "",
     },
 },
 ```
+
+`stationName` とトップレベルの `trackNumber` でホームを特定します。`platformIdHex` を設定した場合は直接指定が優先されます。
 
 ArrivalResponseから主に以下を使います。
 
@@ -160,7 +166,7 @@ audio/station/tomita.dfpwm
 → 駅名単独。「富田」
 ```
 
-`announcement_patterns/segments.lua` は直接音声へ解決するsegmentだけを定義します。複数segmentをまとめる `approach_train_arrival`、`train_info`、`stopped_train_info`、`next_train_info` は `announcement_patterns/composites.lua` に定義します。
+`announcement_patterns/segments.lua` は直接音声へ解決するsegmentだけを定義します。複数segmentをまとめる `approach_train_arrival`、`train_info`、`stopped_train_info`、`next_train_info`、`next_train_announcement` は `announcement_patterns/composites.lua` に定義します。
 
 ### 番線音声
 
@@ -184,6 +190,7 @@ approach = {
     "?track_ni",
     "approach_train_arrival|train",
     "warning",
+    "?car_count_info",
     "?arrival_melody",
     "route:sample",
 }
@@ -224,17 +231,66 @@ audio/approach/warning.dfpwm
 → 接近・通過共通の警告文
 ```
 
-## 停車中の定期案内
-
-`stopped` は `PLATFORM` 状態で定期実行できる放送です。停車中もTSC metadataを取得し、列車種別と行先を使います。
+## 発車放送
 
 標準パターン:
 
 ```lua
-stopped = {
+departure = {
+    "departure_melody",
+    "?doors_closing",
+}
+```
+
+`departure` は発車メロディーを含む一連の発車放送全体として扱います。`doorsClosingEnabled = true` の場合は `audio/departure/doors_closing.dfpwm` も後続して再生します。
+
+```lua
+announcement = {
+    departure = {
+        doorsClosingEnabled = false,
+        departureEndLeadSeconds = 5,
+    },
+},
+```
+
+停車時間を取得できる場合、発車放送の開始時刻は発車放送全体の再生時間を使って逆算します。音声間の `@pause` も再生時間に含まれます。
+
+```text
+開始待ち時間 = max(0, 停車時間 - departure全体時間 - departureEndLeadSeconds)
+```
+
+時間軸は次の扱いです。
+
+```text
+departure開始
+  -> 発車メロディー
+  -> 戸閉め放送など
+  -> departure全体終了
+  -> departureEndLeadSeconds
+  -> 想定発車時刻
+```
+
+盲導鈴は発車放送の実再生終了を基準に、次の待ち時間後に再開します。
+
+```text
+departureEndLeadSeconds + guidanceBell.initialDelaySeconds
+```
+
+旧設定の `melodyEndLeadSeconds` は互換用に読み込みますが、新規設定では `departureEndLeadSeconds` を使用します。
+
+## 停車中の定期案内
+
+`stopped_train` は `PLATFORM` 状態で定期実行する放送です。停車中もTSC metadataを取得し、列車種別と行先を使います。
+
+標準パターン:
+
+```lua
+stopped_train = {
     "?stopped_train_info",
 }
 ```
+
+旧 `stopped` は保存済み設定との互換用aliasとして残しています。
 
 `stopped_train_info` composite は放送全体を一括で解決します。
 
@@ -259,14 +315,14 @@ audio/stopped/train.dfpwm -> 「停車中の列車は」
 
 停車中案内には簡易放送・generic fallbackを実装しません。metadata、番線、固定文、列車種別、行先音声のどれかが不足する場合は、不完全な文を流さずその回の放送をスキップします。
 
-既定では定期放送はOFFです。有効化する場合は保持されている `config.lua` を編集します。
+既定設定では有効で、`PLATFORM` 移行から30秒後、その後30秒間隔です。
 
 ```lua
 periodic = {
     stopped = {
         enabled = true,
         state = "PLATFORM",
-        type = "stopped",
+        type = "stopped_train",
         initialDelayMs = 30000,
         intervalMs = 30000,
     },
@@ -279,18 +335,28 @@ periodic = {
 
 ```lua
 next_train = {
-    "?next_train_info",
+    "?next_train_announcement",
 }
 ```
 
-`next_train_info` composite も放送全体を一括で解決します。
+`next_train_announcement` は任意の次列車メロディーと `next_train_info` をまとめます。
+
+```lua
+next_train_announcement = {
+    "?next_train_melody",
+    "next_train_info",
+}
+```
+
+`next_train_info` は次の要素から構成されます。
 
 ```text
-audio/next_train/intro.dfpwm
+next_train_prefix
 + audio/track/ni/<track>.dfpwm
-+ audio/next_train/train.dfpwm
++ next_train_intro
 + audio/class/<class>.dfpwm
 + audio/destination/desu/<destination>.dfpwm
++ 任意の両数案内
 ```
 
 例:
@@ -299,16 +365,9 @@ audio/next_train/intro.dfpwm
 次に / 1番線に / まいります列車は / 普通 / 富田ゆきです。
 ```
 
-推奨内容:
-
-```text
-audio/next_train/intro.dfpwm -> 「次に」
-audio/next_train/train.dfpwm -> 「まいります列車は」
-```
-
 次列車案内にも簡易放送・generic fallbackを実装しません。必要なmetadataまたは音声が不足する場合は、その回の放送全体をスキップします。
 
-既定では `next_train` の定期放送もOFFです。有効化する場合:
+既定設定では有効で、`IDLE` 移行から60秒後、その後60秒間隔です。
 
 ```lua
 periodic = {
@@ -321,6 +380,8 @@ periodic = {
     },
 }
 ```
+
+次列車案内の後の盲導鈴は、実際の次列車案内終了から `guidanceBell.initialDelaySeconds` 後に再開します。
 
 旧 `audio/stopped/generic.dfpwm` と `audio/next_train/generic.dfpwm` がローカルに残っていても、標準パターンでは使用しません。installerは既存音声を削除しません。
 
@@ -379,6 +440,7 @@ approach = {
     "?track_ni",
     "approach_train_arrival|train",
     "warning",
+    "?car_count_info",
     "?arrival_melody",
     "route:sample",
 }
@@ -403,14 +465,15 @@ slotが未定義の場合は何も挿入しません。slot内では通常のDSL
 既定priority:
 
 ```text
-100  approach
-100  passing
-100  departure
- 20  stopped
- 10  next_train
+3   departure
+2   approach
+2   passing
+1   stopped_train
+0   next_train
+-1  guidance_bell
 ```
 
-高priority requestは低priority放送を中断できます。
+`queue.preemptPriority` の既定値は `2` です。高priority requestは低priorityの再生を中断し、`preemptPriority` 以上では低priorityの待機queueも整理します。
 
 ## コード規約
 
