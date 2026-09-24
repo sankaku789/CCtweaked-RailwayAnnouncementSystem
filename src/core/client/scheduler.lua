@@ -53,52 +53,18 @@ local function ttlFor(config, typeName)
     return tonumber(ttlMs[typeName])
 end
 
--- function: Restart next-train periodic timing so it cannot follow an approach immediately.
-function Scheduler:_restartNextTrainAfterApproach()
-    local currentTime = now()
-    self.queue:removeTypes({ next_train = true })
-
-    for name, cfg in pairs(self.config.periodic or {}) do
-        if type(cfg) == "table"
-            and cfg.type == "next_train"
-            and cfg.enabled == true
-            and cfg.state == "IDLE"
-        then
-            local intervalMs = tonumber(cfg.intervalMs) or 0
-            local initialDelayMs = tonumber(cfg.initialDelayMs)
-            if initialDelayMs == nil then
-                initialDelayMs = intervalMs
-            end
-
-            self.periodicNextAt[name] = currentTime + math.max(0, initialDelayMs)
-        end
-    end
-end
-
--- function: Keep approach as an IDLE-state announcement and start a new stopped metadata snapshot.
+-- function: Enter approach mode and suppress periodic announcements/guidance until departure is reserved.
 function Scheduler:_handleApproach()
     self.stoppedMetadata = nil
+    self.trackState:set("APPROACH")
+    self:_handleStateChange()
 
-    -- TrackState starts as UNKNOWN after a cold boot. The first confirmed
-    -- approach establishes IDLE/next-train mode without starting stopped mode.
-    if self.trackState:get() == "UNKNOWN" then
-        self.trackState:set("IDLE")
-        self:_handleStateChange()
-
-        if self.logger then
-            self.logger.event("State", "IDLE (initial approach)")
-        end
-    end
-
-    -- An approach supersedes the current next-train cycle. Keep the logical
-    -- state at IDLE, but restart the next-train delay so a timer which became
-    -- due during approach playback cannot run immediately afterwards.
-    if self.trackState:get() == "IDLE" then
-        self:_restartNextTrainAfterApproach()
-    end
+    -- Approach begins a continuous guidance hold which remains active through
+    -- the departure reservation and is released only after departure playback.
+    self:_beginSharedGuidanceHold()
 
     if self.logger then
-        self.logger.event("Approach", "signal")
+        self.logger.event("State", "APPROACH (approach)")
     end
 
     self:_enqueue("approach")
@@ -114,9 +80,9 @@ function Scheduler:_handleDeparture()
         self:_handleStateChange()
     end
 
-    -- Departure reservation is the point where next-train mode ends and
-    -- stopped-announcement mode begins. Keep the shared bell suppressed until
-    -- the actual departure announcement reaches a terminal lifecycle event.
+    -- Departure reservation is the point where stopped-announcement mode begins.
+    -- Keep the approach guidance hold active until the actual departure
+    -- announcement reaches a terminal lifecycle event.
     self:_beginSharedGuidanceHold()
 
     -- Stop an active lower-priority periodic announcement, but do not disturb an
