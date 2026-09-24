@@ -53,6 +53,28 @@ local function ttlFor(config, typeName)
     return tonumber(ttlMs[typeName])
 end
 
+-- function: Restart next-train periodic timing so it cannot follow an approach immediately.
+function Scheduler:_restartNextTrainAfterApproach()
+    local currentTime = now()
+    self.queue:removeTypes({ next_train = true })
+
+    for name, cfg in pairs(self.config.periodic or {}) do
+        if type(cfg) == "table"
+            and cfg.type == "next_train"
+            and cfg.enabled == true
+            and cfg.state == "IDLE"
+        then
+            local intervalMs = tonumber(cfg.intervalMs) or 0
+            local initialDelayMs = tonumber(cfg.initialDelayMs)
+            if initialDelayMs == nil then
+                initialDelayMs = intervalMs
+            end
+
+            self.periodicNextAt[name] = currentTime + math.max(0, initialDelayMs)
+        end
+    end
+end
+
 -- function: Keep approach as an IDLE-state announcement and start a new stopped metadata snapshot.
 function Scheduler:_handleApproach()
     self.stoppedMetadata = nil
@@ -66,6 +88,13 @@ function Scheduler:_handleApproach()
         if self.logger then
             self.logger.event("State", "IDLE (initial approach)")
         end
+    end
+
+    -- An approach supersedes the current next-train cycle. Keep the logical
+    -- state at IDLE, but restart the next-train delay so a timer which became
+    -- due during approach playback cannot run immediately afterwards.
+    if self.trackState:get() == "IDLE" then
+        self:_restartNextTrainAfterApproach()
     end
 
     if self.logger then
