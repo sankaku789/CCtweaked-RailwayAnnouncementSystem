@@ -3,6 +3,10 @@ local Scheduler = require("core.guidance_scheduler")
 local DFPWM_BYTES_PER_SECOND = 6000
 
 local originalAfterRequest = Scheduler._afterRequest
+local originalHandleApproach = Scheduler._handleApproach
+local originalHandleDeparture = Scheduler._handleDeparture
+local originalHandleReset = Scheduler._handleReset
+local originalMetadataFor = Scheduler._metadataFor
 
 local function now()
     return os.epoch("utc")
@@ -47,6 +51,58 @@ local function ttlFor(config, typeName)
     local queue = config.queue or {}
     local ttlMs = queue.ttlMs or {}
     return tonumber(ttlMs[typeName])
+end
+
+-- function: Capture fresh train metadata when one platform session begins.
+function Scheduler:_capturePlatformMetadata()
+    self.platformMetadata = nil
+    self:_invalidateMetadata()
+
+    local metadata = originalMetadataFor(self, {
+        type = "approach",
+        track = self.config.trackNumber,
+    })
+
+    if metadata then
+        self.platformMetadata = metadata
+    end
+
+    return metadata
+end
+
+-- function: Snapshot train metadata before queueing the approach announcement.
+function Scheduler:_handleApproach()
+    self:_capturePlatformMetadata()
+    return originalHandleApproach(self)
+end
+
+-- function: End the platform metadata session when the train departs.
+function Scheduler:_handleDeparture()
+    self.platformMetadata = nil
+    return originalHandleDeparture(self)
+end
+
+-- function: End the platform metadata session on a manual reset.
+function Scheduler:_handleReset()
+    self.platformMetadata = nil
+    return originalHandleReset(self)
+end
+
+-- function: Reuse one train snapshot for approach/stopped announcements while on the platform.
+function Scheduler:_metadataFor(request)
+    if request.type == "approach" or request.type == "stopped" then
+        if self.platformMetadata then
+            return self.platformMetadata
+        end
+
+        local metadata = originalMetadataFor(self, request)
+        if metadata then
+            self.platformMetadata = metadata
+        end
+        return metadata
+    end
+
+    return originalMetadataFor(self, request)
 end
 
 -- function: Queue requests using strict priority supersession for this client.
