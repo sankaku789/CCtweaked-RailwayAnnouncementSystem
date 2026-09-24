@@ -26,7 +26,7 @@ local GuidanceServer = require("core.server.guidance")
 local app = {}
 
 local DFPWM_BYTES_PER_SECOND = 6000
-local DEFAULT_DEPARTURE_MELODY_END_LEAD_SECONDS = 3
+local DEFAULT_DEPARTURE_END_LEAD_SECONDS = 3
 
 local function loadAdapter()
     local name = config.adapter and config.adapter.module or "none"
@@ -62,53 +62,72 @@ local function localAudioPath(item)
     return nil
 end
 
-local function departureMelodyDurationSeconds(resolver)
-    local ok, items, reason = pcall(resolver.resolve, resolver, "departure_melody", nil, true)
+local function departureDurationSeconds(composer)
+    local ok, items, diagnostics = pcall(composer.compose, composer, {
+        type = "departure",
+        track = config.trackNumber,
+    }, nil)
     if not ok then
-        return nil, nil, items
+        return nil, items
     end
 
-    if type(items) ~= "table" or #items ~= 1 then
-        return nil, nil, reason or "departure melody did not resolve to exactly one audio file"
+    local duration = 0
+    local started = false
+    for _, item in ipairs(items or {}) do
+        local path = localAudioPath(item)
+        if path and fs.exists(path) and not fs.isDir(path) then
+            started = true
+            duration = duration + (fs.getSize(path) / DFPWM_BYTES_PER_SECOND)
+        elseif type(item) == "table" and item.kind == "pause" and started then
+            duration = duration + math.max(0, tonumber(item.seconds) or 0)
+        end
     end
 
-    local path = localAudioPath(items[1])
-    if not path then
-        return nil, nil, reason or "departure melody did not resolve to a local audio path"
+    if not started then
+        local reason = type(diagnostics) == "table" and diagnostics[1] or nil
+        return nil, reason or "departure announcement did not resolve to playable audio"
     end
 
-    return fs.getSize(path) / DFPWM_BYTES_PER_SECOND, path, nil
+    return duration, nil
 end
 
-local function departureMelodyEndLeadSeconds()
+local function departureEndLeadSeconds()
     local departureConfig = type(config.announcement) == "table" and config.announcement.departure or nil
-    local leadSeconds = type(departureConfig) == "table" and tonumber(departureConfig.melodyEndLeadSeconds) or nil
+    local leadSeconds = nil
+
+    if type(departureConfig) == "table" then
+        leadSeconds = tonumber(departureConfig.departureEndLeadSeconds)
+        if leadSeconds == nil then
+            leadSeconds = tonumber(departureConfig.melodyEndLeadSeconds)
+        end
+    end
 
     if leadSeconds == nil then
-        leadSeconds = DEFAULT_DEPARTURE_MELODY_END_LEAD_SECONDS
+        leadSeconds = DEFAULT_DEPARTURE_END_LEAD_SECONDS
     end
 
     return math.max(0, leadSeconds)
 end
 
-local function buildDepartureTiming(adapter, resolver)
+local function buildDepartureTiming(adapter, composer)
     local fallbackDelaySeconds = math.max(0, tonumber(config.TIMEOUT_TIMING) or 0)
-    local melodySeconds, melodyPath, melodyError = departureMelodyDurationSeconds(resolver)
-    local leadSeconds = departureMelodyEndLeadSeconds()
+    local departureSeconds, departureError = departureDurationSeconds(composer)
+    local leadSeconds = departureEndLeadSeconds()
 
     local timing = {
         dynamic = false,
         candidateCount = nil,
         dwellTimeMs = nil,
-        melodySeconds = melodySeconds,
-        melodyPath = melodyPath,
+        departureSeconds = departureSeconds,
+        -- Compatibility for the base scheduler's existing timing calculation.
+        melodySeconds = departureSeconds,
         leadSeconds = leadSeconds,
         fallbackDelaySeconds = fallbackDelaySeconds,
         staticDelaySeconds = fallbackDelaySeconds,
     }
 
-    if not melodySeconds then
-        log.warn("Departure timing melody unavailable: " .. tostring(melodyError))
+    if not departureSeconds then
+        log.warn("Departure timing announcement unavailable: " .. tostring(departureError))
     end
 
     if not adapter then
@@ -150,9 +169,9 @@ local function buildDepartureTiming(adapter, resolver)
         return timing
     end
 
-    if timing.dwellTimeMs and timing.dwellTimeMs >= 0 and melodySeconds then
+    if timing.dwellTimeMs and timing.dwellTimeMs >= 0 and departureSeconds then
         local dwellSeconds = timing.dwellTimeMs / 1000
-        timing.staticDelaySeconds = math.max(0, dwellSeconds - melodySeconds - leadSeconds)
+        timing.staticDelaySeconds = math.max(0, dwellSeconds - departureSeconds - leadSeconds)
 
         log.event("Departure timing", ("static candidates=%s dwell=%.1fs delay=%.1fs"):format(
             timing.candidateCount and tostring(timing.candidateCount) or "1",
@@ -245,7 +264,7 @@ function app.run()
     local composer = Composer.new(announcementPatterns, resolver, announcementComposites, routeOptions)
 
     local adapter = loadAdapter()
-    local departureTiming = buildDepartureTiming(adapter, resolver)
+    local departureTiming = buildDepartureTiming(adapter, composer)
     local cache = Cache.new(config.adapter.cacheTtlMs)
     local metadataProvider = MetadataProvider.new(adapter, cache, log)
 
