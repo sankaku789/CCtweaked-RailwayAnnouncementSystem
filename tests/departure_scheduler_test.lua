@@ -170,6 +170,7 @@ local scheduler = Scheduler.new({
         dynamic = false,
         staticDelaySeconds = 5,
         fallbackDelaySeconds = 0,
+        leadSeconds = 3,
     },
 })
 
@@ -227,7 +228,7 @@ local stoppedMetadata = scheduler:_metadataFor({
     track = 1,
 })
 assertEqual(stoppedMetadata.class, "local", "stopped_train metadata must resolve")
-assertEqual(metadataProvider.lastRequestType, "stopped", "stopped_train must preserve legacy metadata lookup compatibility")
+assertEqual(metadataProvider.lastRequestType, "stopped_train", "stopped_train metadata lookup must preserve its public type")
 
 fakeNow = 204999
 assertEqual(scheduler:_dispatchDepartureIfDue(fakeNow), false, "departure must wait until deadline")
@@ -249,10 +250,10 @@ assertEqual(scheduler.periodicNextAt.stopped, nil, "stopped timer must stop afte
 assertEqual(scheduler.periodicNextAt.nextTrain, 270000, "next-train timer must start after departure completion")
 assertEqual(metadataProvider.invalidations, 1, "metadata cache must be invalidated after departure")
 assertEqual(scheduler.sharedGuidanceHold, false, "departure completion must release guidance bell hold")
-assertEqual(scheduler.sharedGuidanceResumeAt, 217000, "departure completion must use guidance initial delay")
+assertEqual(scheduler.sharedGuidanceResumeAt, 220000, "departure completion must use lead plus guidance initial delay")
 local departureUpdate = sharedUpdates[#sharedUpdates]
 assertEqual(departureUpdate.state, "IDLE", "departure completion guidance state")
-assertEqual(departureUpdate.resumeAt, 217000, "departure completion must publish initial-delay deadline")
+assertEqual(departureUpdate.resumeAt, 220000, "departure completion must publish lead-plus-initial deadline")
 assertEqual(departureUpdate.hold, false, "departure completion must publish released guidance hold")
 
 -- Passing is also a normal announcement, so guidance must restart with the
