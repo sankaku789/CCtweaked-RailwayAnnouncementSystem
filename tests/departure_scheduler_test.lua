@@ -191,6 +191,25 @@ scheduler.sharedTrackNotifier = function(state, resumeAt, hold)
     }
 end
 
+-- Dynamic timing must subtract the complete departure announcement and lead time.
+local staticDepartureTiming = scheduler.departureTiming
+scheduler.departureTiming = {
+    dynamic = true,
+    departureSeconds = 14,
+    leadSeconds = 5,
+    fallbackDelaySeconds = 0,
+}
+scheduler.departureTimingAdapter = {
+    getCurrentPlatformDwellTimeMs = function()
+        return 30000
+    end,
+}
+local dynamicDelaySeconds, dynamicDwellTimeMs = scheduler:_resolveDepartureTiming()
+assertEqual(dynamicDelaySeconds, 11, "30s dwell - 14s departure - 5s lead must start after 11s")
+assertEqual(dynamicDwellTimeMs, 30000, "dynamic departure timing must preserve current dwell")
+scheduler.departureTiming = staticDepartureTiming
+scheduler.departureTimingAdapter = nil
+
 scheduler:_resetPeriodicTimers()
 assertEqual(scheduler.periodicNextAt.nextTrain, 160000, "startup IDLE must start next-train timer")
 
