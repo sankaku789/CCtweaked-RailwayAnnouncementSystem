@@ -1,12 +1,12 @@
 local Scheduler = require("core.guidance_scheduler")
 
 local DFPWM_BYTES_PER_SECOND = 6000
+local DEPARTURE_SCHEDULE_CHECK_SECONDS = 0.05
 
 local originalAfterRequest = Scheduler._afterRequest
-local originalHandleApproach = Scheduler._handleApproach
-local originalHandleDeparture = Scheduler._handleDeparture
 local originalHandleReset = Scheduler._handleReset
 local originalMetadataFor = Scheduler._metadataFor
+local originalRun = Scheduler.run
 
 local function now()
     return os.epoch("utc")
@@ -53,20 +53,86 @@ local function ttlFor(config, typeName)
     return tonumber(ttlMs[typeName])
 end
 
--- function: Start a new stopped-announcement metadata session for one approach.
+-- function: Keep approach as an IDLE-state announcement and start a new stopped metadata snapshot.
 function Scheduler:_handleApproach()
     self.stoppedMetadata = nil
-    return originalHandleApproach(self)
+
+    if self.logger then
+        self.logger.event("Approach", "signal")
+    end
+
+    self:_enqueue("approach")
 end
 
--- function: End the stopped-announcement metadata session when the train departs.
+-- function: Reserve departure playback without blocking the local announcement queue.
 function Scheduler:_handleDeparture()
-    self.stoppedMetadata = nil
-    return originalHandleDeparture(self)
+    local departureAt = now()
+    local departureDelaySeconds = self:_resolveDepartureTiming()
+
+    if self.trackState:get() ~= "PLATFORM" then
+        self.trackState:set("PLATFORM")
+        self:_handleStateChange()
+    end
+
+    -- Departure reservation is the point where next-train mode ends and
+    -- stopped-announcement mode begins. Keep the shared bell suppressed until
+    -- the actual departure announcement reaches a terminal lifecycle event.
+    self:_beginSharedGuidanceHold()
+
+    -- Stop an active lower-priority periodic announcement, but do not disturb an
+    -- equal-priority approach/passing announcement while the melody is only reserved.
+    self.player:interruptBelow(self:_preemptPriority())
+
+    self.departureDueAt = departureAt + (math.max(0, departureDelaySeconds) * 1000)
+
+    if self.logger then
+        self.logger.event("State", "PLATFORM (departure reserved)")
+        self.logger.event("Departure", ("scheduled %.1fs"):format(math.max(0, departureDelaySeconds)))
+    end
 end
 
--- function: End the stopped-announcement metadata session on a manual reset.
+-- function: Cancel a not-yet-submitted departure reservation.
+function Scheduler:_cancelDepartureSchedule()
+    self.departureDueAt = nil
+end
+
+-- function: Submit the reserved departure only when its playback deadline arrives.
+function Scheduler:_dispatchDepartureIfDue(currentTime)
+    local dueAt = tonumber(self.departureDueAt)
+    currentTime = tonumber(currentTime) or now()
+
+    if not dueAt or currentTime < dueAt then
+        return false
+    end
+
+    self.departureDueAt = nil
+    return self:_enqueue("departure")
+end
+
+-- function: Watch the departure reservation independently from normal queue processing.
+function Scheduler:monitorDepartureSchedule()
+    while true do
+        self:_dispatchDepartureIfDue(now())
+        sleep(DEPARTURE_SCHEDULE_CHECK_SECONDS)
+    end
+end
+
+-- function: End the stopped metadata session and return to next-train mode after departure playback.
+function Scheduler:_finishDepartureState()
+    self:_cancelDepartureSchedule()
+    self.stoppedMetadata = nil
+    self.trackState:set("IDLE")
+    self:_handleStateChange()
+    self:_invalidateMetadata()
+
+    if self.logger then
+        self.logger.event("State", "IDLE (departure complete)")
+    end
+end
+
+-- function: End the stopped-announcement metadata session and any pending departure on reset.
 function Scheduler:_handleReset()
+    self:_cancelDepartureSchedule()
     self.stoppedMetadata = nil
     return originalHandleReset(self)
 end
@@ -154,8 +220,15 @@ function Scheduler:monitorGuidanceBell()
     end
 end
 
--- function: Add the agreed passing->interval guidance resume policy after playback completes.
+-- function: Complete state/guidance transitions after playback finishes.
 function Scheduler:_afterRequest(request, completed, hadSegments)
+    -- IDLE begins only after the departure announcement reaches its terminal
+    -- lifecycle state. Do this before the guidance layer releases its hold so
+    -- the published shared state and next bell deadline are based on IDLE.
+    if request.type == "departure" then
+        self:_finishDepartureState()
+    end
+
     originalAfterRequest(self, request, completed, hadSegments)
 
     if request.type ~= "passing" or not completed or not hadSegments then
@@ -177,21 +250,6 @@ function Scheduler:processQueue()
 
         if request.type == "guidance_bell" then
             self.guidanceQueued = false
-        end
-
-        if request.type == "departure" then
-            local playAt = tonumber(request.departurePlayAt)
-            local delaySeconds
-
-            if playAt then
-                delaySeconds = math.max(0, (playAt - now()) / 1000)
-            else
-                delaySeconds = math.max(0, tonumber(self.config.TIMEOUT_TIMING) or 0)
-            end
-
-            if delaySeconds > 0 then
-                sleep(delaySeconds)
-            end
         end
 
         local metadata = self:_metadataFor(request)
@@ -262,6 +320,18 @@ function Scheduler:processQueue()
         self:_afterRequest(request, completed, hadSegments)
         self.currentRequestType = nil
     end
+end
+
+-- function: Add an independent departure deadline watcher without changing base scheduler tasks.
+function Scheduler:run()
+    parallel.waitForAll(
+        function()
+            originalRun(self)
+        end,
+        function()
+            self:monitorDepartureSchedule()
+        end
+    )
 end
 
 return Scheduler
