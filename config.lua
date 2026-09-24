@@ -98,7 +98,7 @@ return {
             approach = 2,
             passing = 2,
             departure = 3,
-            stopped = 1,
+            stopped_train = 1,
             next_train = 0,
         },
 
@@ -106,7 +106,7 @@ return {
             approach = 30000,
             passing = 30000,
             departure = 30000,
-            stopped = 10000,
+            stopped_train = 10000,
             next_train = 10000,
         },
     },
@@ -117,7 +117,7 @@ return {
         stopped = {
             enabled = true,
             state = "PLATFORM",
-            type = "stopped",
+            type = "stopped_train",
             initialDelayMs = 30000,
             intervalMs = 30000,
         },
