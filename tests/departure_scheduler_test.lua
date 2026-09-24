@@ -19,6 +19,7 @@ fs = {
 }
 
 local Scheduler = require("core.client.scheduler")
+local TrackState = require("core.track_state")
 
 local function assertEqual(actual, expected, message)
     if actual ~= expected then
@@ -38,6 +39,8 @@ local function findQueued(queue, typeName)
     end
     return nil
 end
+
+assertEqual(TrackState.new():get(), "IDLE", "track state must start in IDLE")
 
 local queue = {
     items = {},
@@ -75,7 +78,7 @@ function queue:size()
 end
 
 local trackState = {
-    value = "UNKNOWN",
+    value = "IDLE",
 }
 
 function trackState:get()
@@ -178,34 +181,45 @@ scheduler.guidanceConfig = {
     priority = -1,
 }
 
+local sharedUpdates = {}
+scheduler.sharedTrackNotifier = function(state, resumeAt, hold)
+    sharedUpdates[#sharedUpdates + 1] = {
+        state = state,
+        resumeAt = resumeAt,
+        hold = hold,
+    }
+end
+
 scheduler:_resetPeriodicTimers()
-assertEqual(scheduler.periodicNextAt.nextTrain, nil, "UNKNOWN must not start next-train timer")
+assertEqual(scheduler.periodicNextAt.nextTrain, 160000, "startup IDLE must start next-train timer")
 
+-- APPROACH suppresses both periodic train announcements and the shared guidance bell
+-- until departure is reserved/completed.
+queue.items[#queue.items + 1] = {
+    type = "next_train",
+    priority = 0,
+}
 scheduler:_handleApproach()
-assertEqual(trackState:get(), "IDLE", "initial approach must establish IDLE state")
-assertEqual(scheduler.periodicNextAt.nextTrain, 160000, "initial approach must start next-train delay")
+assertEqual(trackState:get(), "APPROACH", "approach must enter APPROACH state")
+assertEqual(scheduler.periodicNextAt.nextTrain, nil, "approach must stop next-train timer")
+assertEqual(scheduler.periodicNextAt.stopped, nil, "approach must not start stopped timer")
+assertEqual(findQueued(queue, "next_train"), nil, "approach must remove queued next_train")
 assert(findQueued(queue, "approach"), "approach request must be queued")
-assertEqual(findQueued(queue, "next_train"), nil, "next_train must not queue with approach")
-
--- A later approach while already IDLE must restart the next-train delay instead
--- of allowing an older periodic deadline to fire immediately after approach playback.
-queue.items = {}
-fakeNow = 150000
-scheduler:_handleApproach()
-assertEqual(trackState:get(), "IDLE", "normal approach must keep IDLE state")
-assertEqual(scheduler.periodicNextAt.nextTrain, 210000, "approach must restart next-train delay")
-assert(findQueued(queue, "approach"), "normal approach request must be queued")
-assertEqual(findQueued(queue, "next_train"), nil, "next_train must not follow approach immediately")
+assertEqual(scheduler.sharedGuidanceHold, true, "approach must hold guidance bell")
+local approachUpdate = sharedUpdates[#sharedUpdates]
+assertEqual(approachUpdate.state, "APPROACH", "approach guidance state")
+assertEqual(approachUpdate.hold, true, "approach must publish guidance hold")
 
 queue.items = {}
 fakeNow = 200000
 scheduler:_handleDeparture()
 assertEqual(trackState:get(), "PLATFORM", "departure reservation must enter PLATFORM")
 assertEqual(scheduler.departureDueAt, 205000, "departure deadline")
-assertEqual(scheduler.periodicNextAt.nextTrain, nil, "next-train timer must stop on departure reservation")
+assertEqual(scheduler.periodicNextAt.nextTrain, nil, "next-train timer must remain stopped on departure reservation")
 assertEqual(scheduler.periodicNextAt.stopped, 230000, "stopped timer must start on departure reservation")
 assertEqual(config.periodic.stopped.type, "stopped_train", "stopped periodic must use stopped_train announcement")
 assertEqual(findQueued(queue, "departure"), nil, "departure must not be queued before its deadline")
+assertEqual(scheduler.sharedGuidanceHold, true, "departure reservation must keep guidance bell held")
 
 scheduler.stoppedMetadata = nil
 local stoppedMetadata = scheduler:_metadataFor({
@@ -234,5 +248,6 @@ assertEqual(scheduler.stoppedMetadata, nil, "departure completion must clear sto
 assertEqual(scheduler.periodicNextAt.stopped, nil, "stopped timer must stop after departure")
 assertEqual(scheduler.periodicNextAt.nextTrain, 270000, "next-train timer must start after departure completion")
 assertEqual(metadataProvider.invalidations, 1, "metadata cache must be invalidated after departure")
+assertEqual(scheduler.sharedGuidanceHold, false, "departure completion must release guidance bell hold")
 
 print("departure scheduler tests passed")
