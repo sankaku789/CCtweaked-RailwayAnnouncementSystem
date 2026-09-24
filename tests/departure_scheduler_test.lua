@@ -249,5 +249,18 @@ assertEqual(scheduler.periodicNextAt.stopped, nil, "stopped timer must stop afte
 assertEqual(scheduler.periodicNextAt.nextTrain, 270000, "next-train timer must start after departure completion")
 assertEqual(metadataProvider.invalidations, 1, "metadata cache must be invalidated after departure")
 assertEqual(scheduler.sharedGuidanceHold, false, "departure completion must release guidance bell hold")
+assertEqual(scheduler.sharedGuidanceResumeAt, 217000, "departure completion must use guidance initial delay")
+local departureUpdate = sharedUpdates[#sharedUpdates]
+assertEqual(departureUpdate.state, "IDLE", "departure completion guidance state")
+assertEqual(departureUpdate.resumeAt, 217000, "departure completion must publish initial-delay deadline")
+assertEqual(departureUpdate.hold, false, "departure completion must publish released guidance hold")
+
+-- Passing is also a normal announcement, so guidance must restart with the
+-- initial delay rather than the recurring bell interval.
+fakeNow = 220000
+scheduler:_afterRequest({ type = "passing" }, true, true)
+assertEqual(scheduler.sharedGuidanceResumeAt, 227000, "passing completion must use guidance initial delay")
+local passingUpdate = sharedUpdates[#sharedUpdates]
+assertEqual(passingUpdate.resumeAt, 227000, "passing completion must publish initial-delay deadline")
 
 print("departure scheduler tests passed")
