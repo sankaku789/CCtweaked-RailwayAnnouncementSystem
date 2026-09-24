@@ -221,14 +221,17 @@ function GuidanceServer:onPlaybackFinished(request, completed, completedAt)
     local blocked, resumeAt = self:_constraint()
     if blocked then
         self.nextBellAt = nil
-    elseif resumeAt then
-        self.nextBellAt = resumeAt
-    else
-        local intervalAt = completedAt + (self.intervalSeconds * 1000)
-        if self.nextBellAt == nil or self.nextBellAt < intervalAt then
-            self.nextBellAt = intervalAt
-        end
+        return
     end
+
+    -- Every normal announcement restarts the guidance cycle with the initial
+    -- delay. A later client-provided resume deadline may extend that delay, but
+    -- it must never shorten the post-announcement initial delay.
+    local nextAt = completedAt + (self.initialDelaySeconds * 1000)
+    if resumeAt and resumeAt > nextAt then
+        nextAt = resumeAt
+    end
+    self.nextBellAt = nextAt
 end
 
 -- function: Queue one internal guidance request when the shared speaker is idle and due.
@@ -253,8 +256,8 @@ function GuidanceServer:_tryQueueBell()
     end
 
     -- Never invent a new initial-delay deadline while normal playback is active
-    -- or queued. Its completion/state transition decides the correct restart
-    -- policy (for example passing uses interval, departure uses initial delay).
+    -- or queued. Normal announcement completion restarts the initial delay;
+    -- completed guidance bells alone use the recurring interval.
     if not self.playbackServer:isIdle() then
         return
     end
