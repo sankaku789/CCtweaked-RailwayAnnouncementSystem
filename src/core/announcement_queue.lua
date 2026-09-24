@@ -35,12 +35,15 @@ function Queue:enqueue(request)
     assert(type(request) == "table", "request must be a table")
     assert(request.type ~= nil, "request.type is required")
 
+    local currentTime = now()
+    self:_removeExpired(currentTime)
+
     local key = requestKey(request)
     if self.keys[key] then
         return false, "duplicate"
     end
 
-    request.createdAt = request.createdAt or now()
+    request.createdAt = request.createdAt or currentTime
     request.priority = priorityOf(request)
 
     self.items[#self.items + 1] = request
@@ -57,6 +60,22 @@ function Queue:_removeAt(index)
         self.keys[requestKey(request)] = nil
     end
     return request
+end
+
+-- function: Remove every queued request whose expiry deadline has already passed.
+function Queue:_removeExpired(currentTime)
+    currentTime = tonumber(currentTime) or now()
+    local removed = 0
+
+    for index = #self.items, 1, -1 do
+        local expiresAt = tonumber(self.items[index].expiresAt)
+        if expiresAt and expiresAt < currentTime then
+            self:_removeAt(index)
+            removed = removed + 1
+        end
+    end
+
+    return removed
 end
 
 -- function: Return the index of the highest-priority oldest queued request.
