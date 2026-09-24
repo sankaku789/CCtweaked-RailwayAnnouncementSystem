@@ -119,8 +119,6 @@ local function buildDepartureTiming(adapter, composer)
         candidateCount = nil,
         dwellTimeMs = nil,
         departureSeconds = departureSeconds,
-        -- Compatibility for the base scheduler's existing timing calculation.
-        melodySeconds = departureSeconds,
         leadSeconds = leadSeconds,
         fallbackDelaySeconds = fallbackDelaySeconds,
         staticDelaySeconds = fallbackDelaySeconds,
@@ -309,5 +307,7 @@ function app.run()
 
     parallel.waitForAll(table.unpack(tasks))
 end
+
+app._departureDurationSeconds = departureDurationSeconds
 
 return app
