@@ -32,6 +32,11 @@ return {
         "?doors_closing",
     },
 
+    stopped_train = {
+        "?stopped_train_info",
+    },
+
+    -- Compatibility alias for older preserved config.lua files.
     stopped = {
         "?stopped_train_info",
     },
