@@ -75,7 +75,7 @@ function queue:size()
 end
 
 local trackState = {
-    value = "IDLE",
+    value = "UNKNOWN",
 }
 
 function trackState:get()
@@ -179,12 +179,23 @@ scheduler.guidanceConfig = {
 }
 
 scheduler:_resetPeriodicTimers()
-local originalNextTrainDue = scheduler.periodicNextAt.nextTrain
+assertEqual(scheduler.periodicNextAt.nextTrain, nil, "UNKNOWN must not start next-train timer")
 
 scheduler:_handleApproach()
-assertEqual(trackState:get(), "IDLE", "approach must keep IDLE state")
-assertEqual(scheduler.periodicNextAt.nextTrain, originalNextTrainDue, "approach must not reset next-train timer")
+assertEqual(trackState:get(), "IDLE", "initial approach must establish IDLE state")
+assertEqual(scheduler.periodicNextAt.nextTrain, 160000, "initial approach must start next-train delay")
 assert(findQueued(queue, "approach"), "approach request must be queued")
+assertEqual(findQueued(queue, "next_train"), nil, "next_train must not queue with approach")
+
+-- A later approach while already IDLE must restart the next-train delay instead
+-- of allowing an older periodic deadline to fire immediately after approach playback.
+queue.items = {}
+fakeNow = 150000
+scheduler:_handleApproach()
+assertEqual(trackState:get(), "IDLE", "normal approach must keep IDLE state")
+assertEqual(scheduler.periodicNextAt.nextTrain, 210000, "approach must restart next-train delay")
+assert(findQueued(queue, "approach"), "normal approach request must be queued")
+assertEqual(findQueued(queue, "next_train"), nil, "next_train must not follow approach immediately")
 
 queue.items = {}
 fakeNow = 200000
