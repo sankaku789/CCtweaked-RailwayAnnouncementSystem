@@ -53,56 +53,43 @@ local function ttlFor(config, typeName)
     return tonumber(ttlMs[typeName])
 end
 
--- function: Capture fresh train metadata when one platform session begins.
-function Scheduler:_capturePlatformMetadata()
-    self.platformMetadata = nil
-    self:_invalidateMetadata()
-
-    local metadata = originalMetadataFor(self, {
-        type = "approach",
-        track = self.config.trackNumber,
-    })
-
-    if metadata then
-        self.platformMetadata = metadata
-    end
-
-    return metadata
-end
-
--- function: Snapshot train metadata before queueing the approach announcement.
+-- function: Start a new stopped-announcement metadata session for one approach.
 function Scheduler:_handleApproach()
-    self:_capturePlatformMetadata()
+    self.stoppedMetadata = nil
     return originalHandleApproach(self)
 end
 
--- function: End the platform metadata session when the train departs.
+-- function: End the stopped-announcement metadata session when the train departs.
 function Scheduler:_handleDeparture()
-    self.platformMetadata = nil
+    self.stoppedMetadata = nil
     return originalHandleDeparture(self)
 end
 
--- function: End the platform metadata session on a manual reset.
+-- function: End the stopped-announcement metadata session on a manual reset.
 function Scheduler:_handleReset()
-    self.platformMetadata = nil
+    self.stoppedMetadata = nil
     return originalHandleReset(self)
 end
 
--- function: Reuse one train snapshot for approach/stopped announcements while on the platform.
+-- function: Preserve approach metadata only for later stopped announcements.
 function Scheduler:_metadataFor(request)
-    if request.type == "approach" or request.type == "stopped" then
-        if self.platformMetadata then
-            return self.platformMetadata
+    if request.type == "stopped" then
+        if self.stoppedMetadata then
+            return self.stoppedMetadata
         end
 
         local metadata = originalMetadataFor(self, request)
         if metadata then
-            self.platformMetadata = metadata
+            self.stoppedMetadata = metadata
         end
         return metadata
     end
 
-    return originalMetadataFor(self, request)
+    local metadata = originalMetadataFor(self, request)
+    if request.type == "approach" and metadata then
+        self.stoppedMetadata = metadata
+    end
+    return metadata
 end
 
 -- function: Queue requests using strict priority supersession for this client.
