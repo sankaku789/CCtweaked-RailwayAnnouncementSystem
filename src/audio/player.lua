@@ -238,6 +238,10 @@ function Player:playSegments(segments, priority, onAudioStarted)
     self.currentPriority = tonumber(priority) or 0
     self.interruptRequested = false
 
+    if type(self.speakers.preparePlayback) == "function" then
+        self.speakers:preparePlayback()
+    end
+
     local completed = self:_playSegments(segments, onAudioStarted)
 
     self.currentPriority = nil
