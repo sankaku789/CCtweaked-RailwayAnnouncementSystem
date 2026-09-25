@@ -3,6 +3,7 @@ Speakers.__index = Speakers
 
 local DRAIN_EVENT = "railway_speaker_drain_complete"
 local MAX_SPEAKER_RESYNC_ATTEMPTS = 5
+local SPEAKER_READY_TIMEOUT_SECONDS = 10
 
 local function configuredNames(options)
     if type(options.peripherals) ~= "table" then
@@ -55,8 +56,27 @@ local function hasPlaybackDevice(devices, name)
     return false
 end
 
+local function cancelTimer(timerId)
+    if timerId and type(os.cancelTimer) == "function" then
+        pcall(os.cancelTimer, timerId)
+    end
+end
+
 function Speakers:_hasDevice(name)
     return hasPlaybackDevice(self.devices, name)
+end
+
+-- function: Refresh wrapped speaker peripherals from the current attachment state.
+function Speakers:_refreshDevices()
+    local devices = discover(self.allowedNames)
+    if #devices == 0 then
+        return false
+    end
+
+    self.devices = devices
+    self.needsReconnect = false
+    self.degradedPlaybackDevices = nil
+    return true
 end
 
 function Speakers:_waitForDevices(reason)
@@ -66,14 +86,9 @@ function Speakers:_waitForDevices(reason)
 
     local warned = false
     while true do
-        local devices = discover(self.allowedNames)
-        if #devices > 0 then
-            self.devices = devices
-            self.needsReconnect = false
-            self.degradedPlaybackDevices = nil
-
+        if self:_refreshDevices() then
             if self.logger then
-                self.logger.info(("Connected %d speaker(s)."):format(#devices))
+                self.logger.info(("Connected %d speaker(s)."):format(#self.devices))
             end
             return
         end
@@ -160,6 +175,17 @@ function Speakers:drainEvents()
     end
 end
 
+-- function: Clear stale speaker events and refresh wrappers before a new announcement starts.
+function Speakers:preparePlayback()
+    self.audioOutstanding = false
+    self.degradedPlaybackDevices = nil
+    self:drainEvents()
+
+    if not self:_refreshDevices() then
+        self:_reconnect("Speaker unavailable before playback. Reconnecting...")
+    end
+end
+
 function Speakers:waitUntilAllReady(interruptEventName)
     if self.needsReconnect then
         self:_reconnect("Speaker connection changed. Reconnecting...")
@@ -175,14 +201,31 @@ function Speakers:waitUntilAllReady(interruptEventName)
         count = count + 1
     end
 
+    local readyTimer = nil
+    if type(os.startTimer) == "function" then
+        readyTimer = os.startTimer(SPEAKER_READY_TIMEOUT_SECONDS)
+    end
+
     while count > 0 do
         local event, name = os.pullEvent()
 
         if interruptEventName and event == interruptEventName then
+            cancelTimer(readyTimer)
+            return false
+        end
+
+        if readyTimer and event == "timer" and name == readyTimer then
+            self.needsReconnect = true
+            self.audioOutstanding = false
+            self:_reconnect("Speaker audio-ready wait timed out. Reconnecting...")
+            self.degradedPlaybackDevices = nil
             return false
         end
 
         if event == "peripheral_detach" and hasPlaybackDevice(devices, name) then
+            cancelTimer(readyTimer)
+            self.needsReconnect = true
+            self.audioOutstanding = false
             self:_reconnect("Speaker detached: " .. tostring(name))
             self.degradedPlaybackDevices = nil
             return false
@@ -194,6 +237,7 @@ function Speakers:waitUntilAllReady(interruptEventName)
         end
     end
 
+    cancelTimer(readyTimer)
     self.audioOutstanding = false
     return true
 end
