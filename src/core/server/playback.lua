@@ -22,6 +22,10 @@ local function priorityOf(request)
     return tonumber(request.priority) or 0
 end
 
+local function requestLabel(request)
+    return tostring(request.label or request.requestId)
+end
+
 -- function: Create the authoritative playback server and global queue.
 function PlaybackServer.new(options)
     local self = setmetatable({
@@ -364,10 +368,11 @@ function PlaybackServer:_processQueue()
         request.superseded = false
 
         if self.logger and not request.internalGuidance then
-            self.logger.info(("Server playing: %s priority=%s source=%s"):format(
-                tostring(request.label or request.requestId),
+            self.logger.info(("Server dispatching: %s priority=%s source=%s request=%s"):format(
+                requestLabel(request),
                 tostring(request.priority),
-                tostring(request.sourceId)
+                tostring(request.sourceId),
+                tostring(request.requestId)
             ))
         end
 
@@ -379,6 +384,12 @@ function PlaybackServer:_processQueue()
                 request.priority,
                 function(epoch)
                     startedAt = tonumber(epoch) or now()
+                    if self.logger and not request.internalGuidance then
+                        self.logger.info(("Server audio started: %s request=%s"):format(
+                            requestLabel(request),
+                            tostring(request.requestId)
+                        ))
+                    end
                     if request.sourceId ~= 0 then
                         local payload = {
                             requestId = request.requestId,
@@ -400,6 +411,36 @@ function PlaybackServer:_processQueue()
         end
 
         local completedAt = now()
+        if self.logger and not request.internalGuidance then
+            if not ok then
+                self.logger.error(("Server playback failed: %s request=%s reason=%s"):format(
+                    requestLabel(request),
+                    tostring(request.requestId),
+                    tostring(result)
+                ))
+            elseif completed then
+                self.logger.info(("Server playback completed: %s request=%s"):format(
+                    requestLabel(request),
+                    tostring(request.requestId)
+                ))
+            elseif request.superseded then
+                self.logger.info(("Server playback interrupted: %s request=%s reason=superseded"):format(
+                    requestLabel(request),
+                    tostring(request.requestId)
+                ))
+            elseif request.cancelRequested then
+                self.logger.info(("Server playback cancelled: %s request=%s"):format(
+                    requestLabel(request),
+                    tostring(request.requestId)
+                ))
+            else
+                self.logger.warn(("Server playback ended incomplete: %s request=%s"):format(
+                    requestLabel(request),
+                    tostring(request.requestId)
+                ))
+            end
+        end
+
         if request.sourceId ~= 0 then
             if not ok then
                 self:_finishClientRequest(request, Protocol.ACTION.PLAY_FAILED, {
