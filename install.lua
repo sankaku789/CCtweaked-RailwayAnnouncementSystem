@@ -416,6 +416,9 @@ local function install()
     migrateLegacyDestinationFiles()
     migrateLegacyTrackFiles()
 
+    -- Free space from obsolete runtime files before downloading replacements.
+    removeLegacyLayout()
+
     for _, repositoryPath in ipairs(RUNTIME_FILES) do
         downloadFile(repositoryPath, false)
     end
@@ -426,7 +429,6 @@ local function install()
     end
 
     createAudioDirectories()
-    removeLegacyLayout()
 
     print("Installation complete.")
     if refreshPatterns then
