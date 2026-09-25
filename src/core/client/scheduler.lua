@@ -143,8 +143,13 @@ function Scheduler:_handleReset()
     return originalHandleReset(self)
 end
 
--- function: Preserve approach metadata only for later stopped-train announcements.
+-- function: Preserve stopped-train metadata while always refreshing next-train metadata.
 function Scheduler:_metadataFor(request)
+    if request.type == "next_train" then
+        self:_invalidateMetadata()
+        return originalMetadataFor(self, request)
+    end
+
     if request.type == "stopped_train" then
         if self.stoppedMetadata then
             return self.stoppedMetadata
