@@ -56,6 +56,26 @@ local function hasPlaybackDevice(devices, name)
     return false
 end
 
+local function deviceNames(devices)
+    local names = {}
+    for _, device in ipairs(devices or {}) do
+        names[#names + 1] = tostring(device.name)
+    end
+    table.sort(names)
+    return table.concat(names, ",")
+end
+
+local function pendingNames(pending)
+    local names = {}
+    for name, waiting in pairs(pending or {}) do
+        if waiting then
+            names[#names + 1] = tostring(name)
+        end
+    end
+    table.sort(names)
+    return table.concat(names, ",")
+end
+
 local function cancelTimer(timerId)
     if timerId and type(os.cancelTimer) == "function" then
         pcall(os.cancelTimer, timerId)
@@ -88,7 +108,10 @@ function Speakers:_waitForDevices(reason)
     while true do
         if self:_refreshDevices() then
             if self.logger then
-                self.logger.info(("Connected %d speaker(s)."):format(#self.devices))
+                self.logger.info(("Connected %d speaker(s): %s"):format(
+                    #self.devices,
+                    deviceNames(self.devices)
+                ))
             end
             return
         end
@@ -107,6 +130,7 @@ function Speakers:_waitForDevices(reason)
 end
 
 function Speakers:_reconnect(reason)
+    self.acceptedThisPlayback = {}
     self:_waitForDevices(reason or "Speaker connection lost. Reconnecting...")
 end
 
@@ -128,6 +152,7 @@ function Speakers.connect(options, logger)
         audioOutstanding = false,
         degradedPlaybackDevices = nil,
         allowedNames = configuredNames(options),
+        acceptedThisPlayback = {},
     }, Speakers)
 
     self:_waitForDevices()
@@ -179,10 +204,13 @@ end
 function Speakers:preparePlayback()
     self.audioOutstanding = false
     self.degradedPlaybackDevices = nil
+    self.acceptedThisPlayback = {}
     self:drainEvents()
 
     if not self:_refreshDevices() then
         self:_reconnect("Speaker unavailable before playback. Reconnecting...")
+    elseif self.logger then
+        self.logger.info(("Speaker playback prepared: %s"):format(deviceNames(self.devices)))
     end
 end
 
@@ -211,10 +239,18 @@ function Speakers:waitUntilAllReady(interruptEventName)
 
         if interruptEventName and event == interruptEventName then
             cancelTimer(readyTimer)
+            if self.logger then
+                self.logger.info("Speaker wait interrupted")
+            end
             return false
         end
 
         if readyTimer and event == "timer" and name == readyTimer then
+            if self.logger then
+                self.logger.warn(("Speaker audio-ready timeout; pending=%s"):format(
+                    pendingNames(pending)
+                ))
+            end
             self.needsReconnect = true
             self.audioOutstanding = false
             self:_reconnect("Speaker audio-ready wait timed out. Reconnecting...")
@@ -224,6 +260,9 @@ function Speakers:waitUntilAllReady(interruptEventName)
 
         if event == "peripheral_detach" and hasPlaybackDevice(devices, name) then
             cancelTimer(readyTimer)
+            if self.logger then
+                self.logger.warn("Speaker -> detached: " .. tostring(name))
+            end
             self.needsReconnect = true
             self.audioOutstanding = false
             self:_reconnect("Speaker detached: " .. tostring(name))
@@ -234,6 +273,12 @@ function Speakers:waitUntilAllReady(interruptEventName)
         if event == "speaker_audio_empty" and pending[name] then
             pending[name] = nil
             count = count - 1
+            if self.logger then
+                self.logger.info(("Speaker -> audio_empty: %s pending=%d"):format(
+                    tostring(name),
+                    count
+                ))
+            end
         end
     end
 
@@ -276,14 +321,29 @@ function Speakers:playChunk(audio, interruptEventName)
                     tostring(device.name),
                     tostring(accepted)
                 )
+                if self.logger then
+                    self.logger.warn(("Speaker -> error: %s %s"):format(
+                        tostring(device.name),
+                        tostring(accepted)
+                    ))
+                end
                 break
             end
 
             if accepted then
                 acceptedCount = acceptedCount + 1
                 acceptedDevices[#acceptedDevices + 1] = device
+                if not self.acceptedThisPlayback[device.name] then
+                    self.acceptedThisPlayback[device.name] = true
+                    if self.logger then
+                        self.logger.info("Speaker -> accepted: " .. tostring(device.name))
+                    end
+                end
             else
                 rejectedCount = rejectedCount + 1
+                if self.logger then
+                    self.logger.info("Speaker -> busy: " .. tostring(device.name))
+                end
             end
         end
 
