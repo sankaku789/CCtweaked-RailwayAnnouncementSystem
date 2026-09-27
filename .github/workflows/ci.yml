@@ -40,3 +40,11 @@ jobs:
       - name: Test guidance server timing
         run: |
           lua5.2 tests/guidance_server_timing_test.lua
+
+      - name: Test RAM asset server
+        run: |
+          lua5.2 tests/asset_server_memory_test.lua
+
+      - name: Test RAM asset playback
+        run: |
+          lua5.2 tests/player_memory_asset_test.lua
