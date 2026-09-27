@@ -12,14 +12,17 @@ local function isPause(item)
     return type(item) == "table" and item.kind == "pause"
 end
 
-local function audioPath(item)
+local function audioSource(item)
     if type(item) == "string" then
-        return item
+        return "file", item
     end
     if type(item) == "table" and item.kind == "audio" then
-        return item.path
+        return "file", item.path
     end
-    return nil
+    if type(item) == "table" and item.kind == "dfpwm_chunks" then
+        return "chunks", item.chunks
+    end
+    return nil, nil
 end
 
 -- function: Create an audio player for the server-owned speakers.
@@ -72,7 +75,7 @@ function Player:interruptBelow(priority)
     return self:interrupt()
 end
 
-function Player:_playAudioRun(paths, onAudioStarted)
+function Player:_playAudioRun(items, onAudioStarted)
     local pcm = {}
     local pcmCount = 0
     local submittedAudio = false
@@ -85,41 +88,71 @@ function Player:_playAudioRun(paths, onAudioStarted)
         end
     end
 
-    for _, path in ipairs(paths) do
+    local function appendDecoded(decoded)
+        for sampleIndex = 1, #decoded do
+            pcmCount = pcmCount + 1
+            pcm[pcmCount] = decoded[sampleIndex]
+
+            if pcmCount == PCM_CHUNK_SIZE then
+                local accepted = self.speakers:playChunk(pcm, INTERRUPT_EVENT)
+                if not accepted or self.interruptRequested then
+                    return false, "interrupted"
+                end
+
+                markStarted()
+                submittedAudio = true
+                pcm = {}
+                pcmCount = 0
+            end
+        end
+
+        return true
+    end
+
+    local function decodeInput(decoder, input)
+        if self.interruptRequested then
+            return false, "interrupted"
+        end
+        if type(input) ~= "string" or input == "" then
+            return true
+        end
+        return appendDecoded(decoder(input))
+    end
+
+    for _, item in ipairs(items) do
         if self.interruptRequested then
             return false, "interrupted"
         end
 
-        if not self:_validFile(path) then
-            if self.logger then
-                self.logger.warn("Audio file was not found: " .. tostring(path))
-            end
-        else
-            local decoder = dfpwm.make_decoder()
-
-            for input in io.lines(path, DFPWM_READ_SIZE) do
-                if self.interruptRequested then
-                    return false, "interrupted"
+        local sourceKind, source = audioSource(item)
+        if sourceKind == "file" then
+            if not self:_validFile(source) then
+                if self.logger then
+                    self.logger.warn("Audio file was not found: " .. tostring(source))
                 end
-
-                local decoded = decoder(input)
-                for sampleIndex = 1, #decoded do
-                    pcmCount = pcmCount + 1
-                    pcm[pcmCount] = decoded[sampleIndex]
-
-                    if pcmCount == PCM_CHUNK_SIZE then
-                        local accepted = self.speakers:playChunk(pcm, INTERRUPT_EVENT)
-                        if not accepted or self.interruptRequested then
-                            return false, "interrupted"
-                        end
-
-                        markStarted()
-                        submittedAudio = true
-                        pcm = {}
-                        pcmCount = 0
+            else
+                local decoder = dfpwm.make_decoder()
+                for input in io.lines(source, DFPWM_READ_SIZE) do
+                    local ok, reason = decodeInput(decoder, input)
+                    if not ok then
+                        return false, reason
                     end
                 end
             end
+        elseif sourceKind == "chunks" then
+            if type(source) ~= "table" then
+                error("invalid RAM DFPWM chunks")
+            end
+
+            local decoder = dfpwm.make_decoder()
+            for _, input in ipairs(source) do
+                local ok, reason = decodeInput(decoder, input)
+                if not ok then
+                    return false, reason
+                end
+            end
+        else
+            error("unknown playback item kind")
         end
     end
 
@@ -201,18 +234,18 @@ function Player:_playSegments(segments, onAudioStarted)
             end
             index = index + 1
         else
-            local paths = {}
+            local audioItems = {}
 
             while index <= #segments and not isPause(segments[index]) do
-                local path = audioPath(segments[index])
-                if not path then
+                local sourceKind = audioSource(segments[index])
+                if not sourceKind then
                     error("unknown playback item kind")
                 end
-                paths[#paths + 1] = path
+                audioItems[#audioItems + 1] = segments[index]
                 index = index + 1
             end
 
-            local ok, reason = self:_playAudioRun(paths, markPlaybackStarted)
+            local ok, reason = self:_playAudioRun(audioItems, markPlaybackStarted)
             if not ok and reason == "interrupted" then
                 completed = false
                 break
