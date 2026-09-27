@@ -2,6 +2,8 @@ local Scheduler = require("core.guidance_scheduler")
 
 local DFPWM_BYTES_PER_SECOND = 6000
 local DEPARTURE_SCHEDULE_CHECK_SECONDS = 0.05
+local APPROACH_TIMEOUT_SECONDS = 120
+local APPROACH_TIMEOUT_CHECK_SECONDS = 0.25
 
 local originalAfterRequest = Scheduler._afterRequest
 local originalHandleReset = Scheduler._handleReset
@@ -56,6 +58,7 @@ end
 -- function: Enter approach mode and suppress periodic announcements/guidance until departure is reserved.
 function Scheduler:_handleApproach()
     self.stoppedMetadata = nil
+    self.approachTimeoutAt = now() + (APPROACH_TIMEOUT_SECONDS * 1000)
     self.trackState:set("APPROACH")
     self:_handleStateChange()
 
@@ -74,6 +77,7 @@ end
 function Scheduler:_handleDeparture()
     local departureAt = now()
     local departureDelaySeconds = self:_resolveDepartureTiming()
+    self.approachTimeoutAt = nil
 
     if self.trackState:get() ~= "PLATFORM" then
         self.trackState:set("PLATFORM")
@@ -123,9 +127,53 @@ function Scheduler:monitorDepartureSchedule()
     end
 end
 
+-- function: Return an approach state to IDLE after its two-minute safety timeout.
+function Scheduler:_handleApproachTimeout()
+    if self.trackState:get() ~= "APPROACH" then
+        self.approachTimeoutAt = nil
+        return false
+    end
+
+    self.approachTimeoutAt = nil
+    self.queue:removeTypes({ approach = true })
+
+    if self.currentRequestType == "approach" then
+        self.player:interruptBelow(priorityFor(self.config, "approach") + 1)
+    end
+
+    self.stoppedMetadata = nil
+    self.trackState:set("IDLE")
+    self:_handleStateChange()
+    self:_invalidateMetadata()
+
+    local guidance = self.guidanceConfig or self:_readGuidanceConfig()
+    self:_completeSharedGuidanceHold(
+        math.max(0, tonumber(guidance.initialDelaySeconds) or 0),
+        "approach timeout+initial"
+    )
+
+    if self.logger then
+        self.logger.event("State", "IDLE (approach timeout)")
+    end
+
+    return true
+end
+
+-- function: Watch the approach state independently and expire it after two minutes.
+function Scheduler:monitorApproachTimeout()
+    while true do
+        local timeoutAt = tonumber(self.approachTimeoutAt)
+        if timeoutAt and now() >= timeoutAt then
+            self:_handleApproachTimeout()
+        end
+        sleep(APPROACH_TIMEOUT_CHECK_SECONDS)
+    end
+end
+
 -- function: End the stopped metadata session and return to next-train mode after departure playback.
 function Scheduler:_finishDepartureState()
     self:_cancelDepartureSchedule()
+    self.approachTimeoutAt = nil
     self.stoppedMetadata = nil
     self.trackState:set("IDLE")
     self:_handleStateChange()
@@ -139,6 +187,7 @@ end
 -- function: End the stopped-announcement metadata session and any pending departure on reset.
 function Scheduler:_handleReset()
     self:_cancelDepartureSchedule()
+    self.approachTimeoutAt = nil
     self.stoppedMetadata = nil
     return originalHandleReset(self)
 end
@@ -345,7 +394,7 @@ function Scheduler:processQueue()
     end
 end
 
--- function: Add an independent departure deadline watcher without changing base scheduler tasks.
+-- function: Add independent departure and approach deadline watchers without changing base scheduler tasks.
 function Scheduler:run()
     parallel.waitForAll(
         function()
@@ -353,6 +402,9 @@ function Scheduler:run()
         end,
         function()
             self:monitorDepartureSchedule()
+        end,
+        function()
+            self:monitorApproachTimeout()
         end
     )
 end
