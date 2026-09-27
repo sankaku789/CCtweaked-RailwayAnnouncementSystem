@@ -86,6 +86,7 @@ local LEGACY_FILES = {
 }
 
 local LEGACY_DIRECTORIES = {
+    ".railway_announcement_assets",
     "adapter",
     "announcement",
     "core",
@@ -298,7 +299,7 @@ local function migrateLegacyAudioFiles()
             else
                 ensureParent(target)
                 fs.move(source, target)
-                print(("Migrate audio -> %s -> %s"):format(mapping.source, mapping.target))
+                print(("Migrate audio -> %s -> %s"):format(mapping.source, target))
             end
         end
     end
@@ -417,7 +418,7 @@ local function install()
     migrateLegacyDestinationFiles()
     migrateLegacyTrackFiles()
 
-    -- Free space from obsolete runtime files before downloading replacements.
+    -- Free space from obsolete runtime files and the old disk asset cache before downloading replacements.
     removeLegacyLayout()
 
     for _, repositoryPath in ipairs(RUNTIME_FILES) do
