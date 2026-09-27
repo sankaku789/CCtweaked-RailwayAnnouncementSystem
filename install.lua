@@ -17,8 +17,6 @@ local RUNTIME_FILES = {
 
     "src/core/announcement_queue.lua",
     "src/core/composer.lua",
-    "src/core/scheduler.lua",
-    "src/core/guidance_scheduler.lua",
     "src/core/track_state.lua",
     "src/core/protocol.lua",
 
@@ -80,6 +78,8 @@ local LEGACY_FILES = {
     "src/audio/guidance_bell.lua",
     "src/hardware/redstone_input.lua",
     "src/hardware/shared_speakers.lua",
+    "src/core/scheduler.lua",
+    "src/core/guidance_scheduler.lua",
     "src/core/shared_guidance.lua",
     "src/core/shared_guidance_policy.lua",
 }
