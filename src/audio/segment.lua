@@ -130,16 +130,6 @@ function Segment:exists(path)
         and not fs.isDir(path)
 end
 
--- function: Resolve an audio asset ID to a DFPWM file inside a directory.
-function Segment:fromId(directory, value)
-    local path = pathFromId(directory, value)
-    if path and self:exists(path) then
-        return path
-    end
-
-    return nil
-end
-
 -- function: Check whether a segment definition is enabled by configuration.
 function Segment:_isEnabled(definition)
     if definition.enabled == nil then

@@ -4,7 +4,6 @@ Protocol.SYSTEM = "railway_announcement_cs"
 Protocol.VERSION = 3
 Protocol.REDNET_PROTOCOL = "railway_announcement_cs_v3"
 Protocol.PLAYBACK_EVENT = "railway_playback_response"
-Protocol.ASSET_EVENT = "railway_asset_response"
 Protocol.SERVER_QUEUE_EVENT = "railway_server_queue_changed"
 
 Protocol.ACTION = {

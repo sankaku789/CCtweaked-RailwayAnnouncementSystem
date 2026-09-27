@@ -87,11 +87,11 @@ local function buildDepartureTiming(adapter, composer)
     local fallbackDelaySeconds = math.max(0, tonumber(config.TIMEOUT_TIMING) or 0)
     local departureSeconds, departureError = departureDurationSeconds(composer)
     local leadSeconds = departureEndLeadSeconds()
+    local candidateCount = nil
+    local dwellTimeMs = nil
 
     local timing = {
         dynamic = false,
-        candidateCount = nil,
-        dwellTimeMs = nil,
         departureSeconds = departureSeconds,
         leadSeconds = leadSeconds,
         fallbackDelaySeconds = fallbackDelaySeconds,
@@ -118,35 +118,35 @@ local function buildDepartureTiming(adapter, composer)
 
         if type(profile) == "table" then
             timing.dynamic = profile.dynamic == true
-            timing.candidateCount = tonumber(profile.candidateCount)
-            timing.dwellTimeMs = tonumber(profile.dwellTimeMs)
+            candidateCount = tonumber(profile.candidateCount)
+            dwellTimeMs = tonumber(profile.dwellTimeMs)
         end
     elseif type(adapter.getPlatformDwellTimeMs) == "function" then
-        local ok, dwellTimeMs = pcall(adapter.getPlatformDwellTimeMs, adapter, {
+        local ok, value = pcall(adapter.getPlatformDwellTimeMs, adapter, {
             track = config.trackNumber,
         })
 
         if not ok then
-            log.warn("MTR departure timing unavailable: " .. tostring(dwellTimeMs))
+            log.warn("MTR departure timing unavailable: " .. tostring(value))
             return timing
         end
 
-        timing.dwellTimeMs = tonumber(dwellTimeMs)
+        dwellTimeMs = tonumber(value)
     end
 
     if timing.dynamic then
         log.event("Departure timing", ("dynamic candidates=%s"):format(
-            timing.candidateCount and tostring(timing.candidateCount) or "?"
+            candidateCount and tostring(candidateCount) or "?"
         ))
         return timing
     end
 
-    if timing.dwellTimeMs and timing.dwellTimeMs >= 0 and departureSeconds then
-        local dwellSeconds = timing.dwellTimeMs / 1000
+    if dwellTimeMs and dwellTimeMs >= 0 and departureSeconds then
+        local dwellSeconds = dwellTimeMs / 1000
         timing.staticDelaySeconds = math.max(0, dwellSeconds - departureSeconds - leadSeconds)
 
         log.event("Departure timing", ("static candidates=%s dwell=%.1fs delay=%.1fs"):format(
-            timing.candidateCount and tostring(timing.candidateCount) or "1",
+            candidateCount and tostring(candidateCount) or "1",
             dwellSeconds,
             timing.staticDelaySeconds
         ))
@@ -222,7 +222,6 @@ function app.run()
         serverId = coordinator:getServerId(),
         instanceId = coordinator:getInstanceId(),
         localServer = playbackServer,
-        logger = log,
     })
 
     coordinator:setGuidanceProvider(function()
@@ -230,7 +229,7 @@ function app.run()
     end)
 
     local input = RailwayInput.new(config.input)
-    local trackState = TrackState.new(config.state)
+    local trackState = TrackState.new()
     local queue = Queue.new()
     local resolver = Segment.new(config, segmentDefinitions)
     local composer = Composer.new(announcementPatterns, resolver, announcementComposites, routeOptions)
@@ -244,7 +243,6 @@ function app.run()
         config = config,
         logger = log,
         input = input,
-        speakers = speakers,
         trackState = trackState,
         queue = queue,
         metadataProvider = metadataProvider,

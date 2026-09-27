@@ -146,6 +146,7 @@ function AssetClient:sync(assetKey, path)
     if self.localAssetServer then
         local ok, reason = self.localAssetServer:registerLocal(
             os.getComputerID(),
+            assetKey,
             transportKey,
             path,
             size,
@@ -165,6 +166,7 @@ function AssetClient:sync(assetKey, path)
         Protocol.ACTION.ASSET_QUERY,
         {
             assetKey = transportKey,
+            logicalKey = assetKey,
             size = size,
             checksum = checksum,
         },
@@ -191,6 +193,7 @@ function AssetClient:sync(assetKey, path)
         Protocol.ACTION.ASSET_BEGIN,
         {
             assetKey = transportKey,
+            logicalKey = assetKey,
             size = size,
             checksum = checksum,
         },
@@ -243,6 +246,7 @@ function AssetClient:sync(assetKey, path)
         Protocol.ACTION.ASSET_COMMIT,
         {
             assetKey = transportKey,
+            logicalKey = assetKey,
             size = size,
             checksum = checksum,
         },
@@ -258,7 +262,7 @@ function AssetClient:sync(assetKey, path)
 
     self:_markReady(assetKey, path, size, checksum, transportKey)
     if self.logger then
-        self.logger.info(("Client asset uploaded: %s (%d bytes)"):format(assetKey, size))
+        self.logger.info(("Client asset uploaded: %s (%d bytes, RAM)"):format(assetKey, size))
     end
     return true, transportKey
 end

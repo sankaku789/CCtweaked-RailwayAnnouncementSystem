@@ -73,10 +73,6 @@ function queue:removeTypes(types)
     return removed
 end
 
-function queue:size()
-    return #self.items
-end
-
 local trackState = {
     value = "IDLE",
 }
@@ -204,9 +200,8 @@ scheduler.departureTimingAdapter = {
         return 30000
     end,
 }
-local dynamicDelaySeconds, dynamicDwellTimeMs = scheduler:_resolveDepartureTiming()
+local dynamicDelaySeconds = scheduler:_resolveDepartureTiming()
 assertEqual(dynamicDelaySeconds, 11, "30s dwell - 14s departure - 5s lead must start after 11s")
-assertEqual(dynamicDwellTimeMs, 30000, "dynamic departure timing must preserve current dwell")
 scheduler.departureTiming = staticDepartureTiming
 scheduler.departureTimingAdapter = nil
 

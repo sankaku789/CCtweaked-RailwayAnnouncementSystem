@@ -14,13 +14,8 @@ function Cache.new(ttlMs)
     }, Cache)
 end
 
--- function: Store or remove a metadata cache entry.
+-- function: Store a metadata cache entry.
 function Cache:set(key, value)
-    if value == nil then
-        self.values[key] = nil
-        return
-    end
-
     self.values[key] = {
         value = value,
         updatedAt = now(),
@@ -42,13 +37,9 @@ function Cache:get(key)
     return item.value
 end
 
--- function: Clear one metadata cache entry or the whole cache.
+-- function: Clear one metadata cache entry.
 function Cache:clear(key)
-    if key == nil then
-        self.values = {}
-    else
-        self.values[key] = nil
-    end
+    self.values[key] = nil
 end
 
 return Cache

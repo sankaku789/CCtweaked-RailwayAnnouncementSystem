@@ -11,15 +11,12 @@ local RUNTIME_FILES = {
     "src/adapter/mtr.lua",
     "src/adapter/none.lua",
 
-    "src/audio/guidance_bell.lua",
     "src/audio/player.lua",
     "src/audio/segment.lua",
     "src/audio/timeline.lua",
 
     "src/core/announcement_queue.lua",
     "src/core/composer.lua",
-    "src/core/scheduler.lua",
-    "src/core/guidance_scheduler.lua",
     "src/core/track_state.lua",
     "src/core/protocol.lua",
 
@@ -34,7 +31,6 @@ local RUNTIME_FILES = {
     "src/core/server/playback.lua",
 
     "src/hardware/railway_input.lua",
-    "src/hardware/redstone_input.lua",
     "src/hardware/speakers.lua",
 
     "src/metadata/cache.lua",
@@ -68,6 +64,7 @@ local AUDIO_DIRECTORIES = {
     "audio/track/ni",
     "audio/track/wo",
     "audio/class",
+    "audio/cars",
     "audio/destination",
     "audio/destination/desu",
     "audio/destination/mairimasu",
@@ -79,12 +76,17 @@ local LEGACY_FILES = {
     "app.lua",
     "audio/player.lua",
     "audio/segment.lua",
+    "src/audio/guidance_bell.lua",
+    "src/hardware/redstone_input.lua",
     "src/hardware/shared_speakers.lua",
+    "src/core/scheduler.lua",
+    "src/core/guidance_scheduler.lua",
     "src/core/shared_guidance.lua",
     "src/core/shared_guidance_policy.lua",
 }
 
 local LEGACY_DIRECTORIES = {
+    ".railway_announcement_assets",
     "adapter",
     "announcement",
     "core",
@@ -297,7 +299,7 @@ local function migrateLegacyAudioFiles()
             else
                 ensureParent(target)
                 fs.move(source, target)
-                print(("Migrate audio -> %s -> %s"):format(mapping.source, mapping.target))
+                print(("Migrate audio -> %s -> %s"):format(mapping.source, target))
             end
         end
     end
@@ -416,7 +418,7 @@ local function install()
     migrateLegacyDestinationFiles()
     migrateLegacyTrackFiles()
 
-    -- Free space from obsolete runtime files before downloading replacements.
+    -- Free space from obsolete runtime files and the old disk asset cache before downloading replacements.
     removeLegacyLayout()
 
     for _, repositoryPath in ipairs(RUNTIME_FILES) do

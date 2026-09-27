@@ -54,22 +54,6 @@ local function nameParts(value)
     return result
 end
 
--- function: Extract a printable ASCII part of an MTR multilingual name regardless of its position.
-local function englishPart(value)
-    for _, part in ipairs(nameParts(value)) do
-        if isPrintableAscii(part) then
-            return part
-        end
-    end
-
-    return nil
-end
-
--- function: Select the printable ASCII display name used for normalized asset IDs.
-local function asciiName(value)
-    return englishPart(value)
-end
-
 -- function: Match a configured station or platform name against any MTR multilingual component.
 local function nameMatches(value, expected)
     if type(value) ~= "string" or type(expected) ~= "string" then
