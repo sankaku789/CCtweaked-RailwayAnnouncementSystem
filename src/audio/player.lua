@@ -143,10 +143,6 @@ function Player:_playAudioRun(paths, onAudioStarted)
     return true
 end
 
-function Player:playFile(path, onAudioStarted)
-    return self:_playAudioRun({ path }, onAudioStarted)
-end
-
 function Player:_waitPause(seconds)
     if self.interruptRequested then
         return false, "interrupted"

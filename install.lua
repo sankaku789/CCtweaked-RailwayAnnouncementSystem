@@ -11,7 +11,6 @@ local RUNTIME_FILES = {
     "src/adapter/mtr.lua",
     "src/adapter/none.lua",
 
-    "src/audio/guidance_bell.lua",
     "src/audio/player.lua",
     "src/audio/segment.lua",
     "src/audio/timeline.lua",
@@ -34,7 +33,6 @@ local RUNTIME_FILES = {
     "src/core/server/playback.lua",
 
     "src/hardware/railway_input.lua",
-    "src/hardware/redstone_input.lua",
     "src/hardware/speakers.lua",
 
     "src/metadata/cache.lua",
@@ -79,6 +77,8 @@ local LEGACY_FILES = {
     "app.lua",
     "audio/player.lua",
     "audio/segment.lua",
+    "src/audio/guidance_bell.lua",
+    "src/hardware/redstone_input.lua",
     "src/hardware/shared_speakers.lua",
     "src/core/shared_guidance.lua",
     "src/core/shared_guidance_policy.lua",
