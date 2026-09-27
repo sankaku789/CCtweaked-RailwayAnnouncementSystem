@@ -10,7 +10,6 @@ function GuidanceClient.new(options)
         serverId = options.serverId,
         instanceId = options.instanceId,
         localServer = options.localServer,
-        logger = options.logger,
         revision = 0,
         blocked = false,
         resumeAt = nil,

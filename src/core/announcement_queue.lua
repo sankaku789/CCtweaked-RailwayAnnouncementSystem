@@ -15,10 +15,6 @@ end
 
 -- function: Build the deduplication key for an announcement request.
 local function requestKey(request)
-    if request.dedupeKey ~= nil then
-        return tostring(request.dedupeKey)
-    end
-
     return ("%s:%s"):format(tostring(request.type), tostring(request.track))
 end
 
@@ -166,11 +162,6 @@ function Queue:removeTypes(types)
     end
 
     return removed
-end
-
--- function: Return the number of queued announcement requests.
-function Queue:size()
-    return #self.items
 end
 
 return Queue

@@ -2,14 +2,13 @@ local TrackState = {}
 TrackState.__index = TrackState
 
 local states = {
-    UNKNOWN = true,
     IDLE = true,
     APPROACH = true,
     PLATFORM = true,
 }
 
 -- function: Create a track state holder starting in next-train/IDLE mode.
-function TrackState.new(_options)
+function TrackState.new()
     return setmetatable({
         state = "IDLE",
     }, TrackState)

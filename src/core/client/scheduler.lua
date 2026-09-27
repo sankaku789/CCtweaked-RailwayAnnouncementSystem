@@ -132,21 +132,20 @@ function Scheduler:_invalidateMetadata()
     end
 end
 
--- function: Resolve the dwell and departure-announcement delay for the current departure event.
+-- function: Resolve the departure-announcement delay for the current departure event.
 function Scheduler:_resolveDepartureTiming()
     local timing = type(self.departureTiming) == "table" and self.departureTiming or {}
     local fallbackDelaySeconds = math.max(
         0,
         tonumber(timing.fallbackDelaySeconds) or tonumber(self.config.TIMEOUT_TIMING) or 0
     )
-    local dwellTimeMs = tonumber(timing.dwellTimeMs)
     local delaySeconds = tonumber(timing.staticDelaySeconds) or fallbackDelaySeconds
 
     if timing.dynamic ~= true then
-        return math.max(0, delaySeconds), dwellTimeMs
+        return math.max(0, delaySeconds)
     end
 
-    dwellTimeMs = nil
+    local dwellTimeMs = nil
     local adapter = self.departureTimingAdapter
     local getter = nil
 
@@ -189,7 +188,7 @@ function Scheduler:_resolveDepartureTiming()
         ))
     end
 
-    return delaySeconds, dwellTimeMs
+    return delaySeconds
 end
 
 -- function: Queue requests using strict priority supersession for this client.

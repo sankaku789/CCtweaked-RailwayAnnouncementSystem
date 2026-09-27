@@ -64,6 +64,7 @@ local AUDIO_DIRECTORIES = {
     "audio/track/ni",
     "audio/track/wo",
     "audio/class",
+    "audio/cars",
     "audio/destination",
     "audio/destination/desu",
     "audio/destination/mairimasu",

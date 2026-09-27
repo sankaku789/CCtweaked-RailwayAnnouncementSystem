@@ -27,7 +27,6 @@ function Coordinator.new(config, logger)
     local computerId = os.getComputerID()
 
     return setmetatable({
-        config = config,
         logger = logger,
         groupId = groupId,
         computerId = computerId,
