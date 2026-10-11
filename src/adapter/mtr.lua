@@ -194,6 +194,49 @@ local function preserveRouteIds(raw)
     end)
 end
 
+-- function: Convert an exact signed decimal route ID to its unsigned 64-bit hex ID.
+local function routeIdHex(routeId)
+    if type(routeId) ~= "string" or not routeId:match("^%-?%d+$") then
+        return nil
+    end
+
+    local negative = routeId:sub(1, 1) == "-"
+    local decimal = negative and routeId:sub(2) or routeId
+    local digits = "0123456789ABCDEF"
+    local hex = ""
+    repeat
+        local quotient = ""
+        local remainder = 0
+        for index = 1, #decimal do
+            local value = remainder * 10 + tonumber(decimal:sub(index, index))
+            local digit = math.floor(value / 16)
+            remainder = value % 16
+            if digit > 0 or quotient ~= "" then
+                quotient = quotient .. tostring(digit)
+            end
+        end
+        hex = digits:sub(remainder + 1, remainder + 1) .. hex
+        decimal = quotient
+    until decimal == ""
+
+    if #hex > 16 then
+        return nil
+    end
+    hex = string.rep("0", 16 - #hex) .. hex
+    if negative then
+        local result = ""
+        local carry = 1
+        for index = 16, 1, -1 do
+            local value = 15 - tonumber(hex:sub(index, index), 16) + carry
+            carry = math.floor(value / 16)
+            value = value % 16
+            result = digits:sub(value + 1, value + 1) .. result
+        end
+        hex = result
+    end
+    return hex
+end
+
 -- function: Create an MTR metadata adapter.
 function MtrAdapter.new(options)
     options = options or {}
@@ -443,7 +486,30 @@ function MtrAdapter:_requestArrival(context)
     return nil
 end
 
--- function: Return normalized train metadata, car count, route ID, and terminating status for the next MTR arrival.
+-- function: Resolve hidden status from the route map, whose IDs use unsigned hex strings.
+function MtrAdapter:_isHiddenRoute(routeId)
+    local hex = routeIdHex(routeId)
+    if not hex then
+        return false
+    end
+
+    local data = self:_requestMap("stations-and-routes", nil, false)
+    local routes = type(data) == "table" and data.routes or nil
+    if type(routes) ~= "table" then
+        error("MTR stations-and-routes response does not contain routes")
+    end
+
+    for _, route in ipairs(routes) do
+        if type(route) == "table" and type(route.id) == "string"
+            and route.id:upper() == hex
+        then
+            return route.hidden == true
+        end
+    end
+    return false
+end
+
+-- function: Return normalized train metadata and terminating/hidden status for the next MTR arrival.
 function MtrAdapter:getMetadata(context)
     local arrival = self:_requestArrival(context)
     if not arrival then
@@ -473,6 +539,7 @@ function MtrAdapter:getMetadata(context)
         destination = destinationId,
         carCount = carCount,
         terminating = terminating,
+        hidden = self:_isHiddenRoute(routeId),
         routeId = routeId,
     }
 end

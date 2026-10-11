@@ -137,7 +137,7 @@ end
 function Composer:_patternName(request, metadata)
     if request.type == "approach"
         and type(metadata) == "table"
-        and metadata.terminating == true
+        and (metadata.terminating == true or metadata.hidden == true)
         and type(self.patterns.approach_out_of_service) == "table"
     then
         return "approach_out_of_service"
@@ -315,7 +315,7 @@ end
 function Composer:compose(request, metadata)
     if request.type == "next_train"
         and type(metadata) == "table"
-        and metadata.terminating == true
+        and (metadata.terminating == true or metadata.hidden == true)
     then
         return {}, { "next train is out of service" }
     end
