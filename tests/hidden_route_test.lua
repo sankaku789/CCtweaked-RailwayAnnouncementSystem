@@ -4,7 +4,12 @@ local MtrAdapter = require("adapter.mtr")
 local Composer = require("core.composer")
 
 local adapter = MtrAdapter.new({})
-local arrival = { routeId = "-8442318287410092952", isTerminating = false }
+local arrival = {
+    routeId = "-8442318287410092952",
+    isTerminating = false,
+    arrival = 100000,
+    departure = 145000,
+}
 local routes = {
     { id = "8AD6DC3F36232468", hidden = true },
     { id = "AE15E06B69A5ED48", hidden = false },
@@ -23,6 +28,7 @@ end
 
 local hidden = adapter:getMetadata({})
 assert(hidden.hidden == true and hidden.terminating == false)
+assert(hidden.dwellTimeMs == 45000)
 assert(adapter:_isHiddenRoute("5974863621745288138") == true)
 assert(adapter:_isHiddenRoute("-5902564984660562616") == false)
 assert(adapter:_isHiddenRoute("-9223372036854775808") == true)

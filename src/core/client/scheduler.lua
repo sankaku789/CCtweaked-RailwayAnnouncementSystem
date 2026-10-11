@@ -193,6 +193,11 @@ end
 
 -- function: Queue requests using strict priority supersession for this client.
 function Scheduler:_enqueue(typeName, priorityOverride)
+    if self.outOfServiceDueAt ~= nil
+        and (typeName == "stopped_train" or typeName == "stopped")
+    then
+        return false
+    end
     local priority = tonumber(priorityOverride)
     if priority == nil then
         priority = priorityFor(self.config, typeName)
@@ -228,6 +233,7 @@ end
 
 -- function: Enter approach mode and suppress periodic announcements/guidance until departure is reserved.
 function Scheduler:_handleApproach()
+    self.outOfServiceDueAt = nil
     self.stoppedMetadata = nil
     self.approachTimeoutAt = now() + (APPROACH_TIMEOUT_SECONDS * 1000)
     self.trackState:set("APPROACH")
@@ -244,7 +250,27 @@ end
 -- function: Reserve departure playback without blocking the local announcement queue.
 function Scheduler:_handleDeparture()
     local departureAt = now()
-    local departureDelaySeconds = self:_resolveDepartureTiming()
+    local metadata = self.stoppedMetadata or self:_metadataFor({
+        type = "stopped_train",
+        track = self.config.trackNumber,
+    })
+    local outOfService = type(metadata) == "table"
+        and (metadata.terminating == true or metadata.hidden == true)
+    local departureDelaySeconds
+    if outOfService then
+        local dwellTimeMs = tonumber(metadata.dwellTimeMs)
+        if dwellTimeMs and dwellTimeMs >= 0 then
+            departureDelaySeconds = dwellTimeMs / 1000
+        else
+            departureDelaySeconds = math.max(0, tonumber(self.config.TIMEOUT_TIMING) or 0)
+            if self.logger then
+                self.logger.warn("Out-of-service dwell unavailable; using TIMEOUT_TIMING")
+            end
+        end
+    else
+        departureDelaySeconds = self:_resolveDepartureTiming()
+    end
+    self:_cancelDepartureSchedule()
     self.approachTimeoutAt = nil
 
     if self.trackState:get() ~= "PLATFORM" then
@@ -254,11 +280,17 @@ function Scheduler:_handleDeparture()
 
     self:_beginSharedGuidanceHold()
     self.player:interruptBelow(self:_preemptPriority())
-    self.departureDueAt = departureAt + (math.max(0, departureDelaySeconds) * 1000)
+    local dueAt = departureAt + (math.max(0, departureDelaySeconds) * 1000)
+    if outOfService then
+        self.outOfServiceDueAt = dueAt
+    else
+        self.departureDueAt = dueAt
+    end
 
     if self.logger then
-        self.logger.event("State", "PLATFORM (departure reserved)")
-        self.logger.event("Departure", ("scheduled %.1fs"):format(math.max(0, departureDelaySeconds)))
+        self.logger.event("State", outOfService and "PLATFORM (out-of-service dwell)" or "PLATFORM (departure reserved)")
+        self.logger.event(outOfService and "Out-of-service dwell" or "Departure",
+            ("scheduled %.1fs"):format(math.max(0, departureDelaySeconds)))
     end
 end
 
@@ -272,7 +304,7 @@ end
 -- function: End the stopped-announcement metadata session and any pending departure on reset.
 function Scheduler:_handleReset()
     local resetAt = now()
-    self.departureDueAt = nil
+    self:_cancelDepartureSchedule()
     self.approachTimeoutAt = nil
     self.stoppedMetadata = nil
     self.sharedGuidanceHold = false
@@ -353,12 +385,23 @@ end
 -- function: Cancel a not-yet-submitted departure reservation.
 function Scheduler:_cancelDepartureSchedule()
     self.departureDueAt = nil
+    self.outOfServiceDueAt = nil
 end
 
 -- function: Submit the reserved departure only when its playback deadline arrives.
 function Scheduler:_dispatchDepartureIfDue(currentTime)
-    local dueAt = tonumber(self.departureDueAt)
     currentTime = tonumber(currentTime) or now()
+    local outOfServiceDueAt = tonumber(self.outOfServiceDueAt)
+    if outOfServiceDueAt then
+        if currentTime < outOfServiceDueAt then
+            return false
+        end
+        self:_finishDepartureState()
+        local guidance = self.guidanceConfig or self:_readGuidanceConfig()
+        self:_completeSharedGuidanceHold(guidance.initialDelaySeconds)
+        return true
+    end
+    local dueAt = tonumber(self.departureDueAt)
 
     if not dueAt or currentTime < dueAt then
         return false

@@ -523,6 +523,10 @@ function MtrAdapter:getMetadata(context)
     local destinationId = normalizeAssetId(arrival.destination)
     local carCount = carCountFromArrival(arrival)
     local terminating = arrival.isTerminating == true
+    local arrivalTime = tonumber(arrival.arrival)
+    local departureTime = tonumber(arrival.departure)
+    local dwellTimeMs = arrivalTime and departureTime
+        and departureTime >= arrivalTime and (departureTime - arrivalTime) or nil
     local routeId = type(arrival.routeId) == "string" and trim(arrival.routeId) or nil
 
     if routeId == "" then
@@ -539,6 +543,7 @@ function MtrAdapter:getMetadata(context)
         destination = destinationId,
         carCount = carCount,
         terminating = terminating,
+        dwellTimeMs = dwellTimeMs,
         hidden = self:_isHiddenRoute(routeId),
         routeId = routeId,
     }

@@ -278,4 +278,57 @@ assertEqual(scheduler.sharedGuidanceResumeAt, 227000, "passing completion must u
 local passingUpdate = sharedUpdates[#sharedUpdates]
 assertEqual(passingUpdate.resumeAt, 227000, "passing completion must publish initial-delay deadline")
 
+-- Out-of-service trains wait the full dwell, without departure or stopped announcements.
+for _, metadata in ipairs({
+    { terminating = true, hidden = false, dwellTimeMs = 45000 },
+    { terminating = false, hidden = true, dwellTimeMs = 45000 },
+}) do
+    fakeNow = 300000
+    queue.items = {}
+    scheduler.stoppedMetadata = metadata
+    scheduler:_handleDeparture()
+    assertEqual(trackState:get(), "PLATFORM", "out-of-service must hold PLATFORM during dwell")
+    assertEqual(scheduler.departureDueAt, nil, "out-of-service must not reserve departure")
+    assertEqual(scheduler.outOfServiceDueAt, 345000, "out-of-service must use complete dwell")
+    assertEqual(scheduler:_enqueue("stopped_train"), false, "out-of-service must suppress stopped announcements")
+    assertEqual(scheduler:_enqueue("stopped"), false, "out-of-service must suppress legacy stopped announcements")
+    fakeNow = 344999
+    assertEqual(scheduler:_dispatchDepartureIfDue(fakeNow), false, "out-of-service must wait full dwell")
+    assertEqual(trackState:get(), "PLATFORM", "out-of-service must not return to IDLE early")
+    fakeNow = 345000
+    assertEqual(scheduler:_dispatchDepartureIfDue(fakeNow), true, "out-of-service dwell must complete")
+    assertEqual(trackState:get(), "IDLE", "out-of-service dwell must return to IDLE")
+    assertEqual(scheduler.stoppedMetadata, nil, "out-of-service dwell must clear metadata")
+    assertEqual(scheduler.outOfServiceDueAt, nil, "out-of-service dwell must clear deadline")
+    assertEqual(findQueued(queue, "departure"), nil, "out-of-service must never queue departure")
+    assertEqual(scheduler.sharedGuidanceHold, false, "out-of-service dwell must release guidance hold")
+    assertEqual(scheduler.sharedGuidanceResumeAt, 352000, "out-of-service guidance must not add departure lead")
+    assertEqual(scheduler.periodicNextAt.nextTrain, 405000, "out-of-service completion must restart next train timer")
+end
+
+fakeNow = 400000
+scheduler.stoppedMetadata = { hidden = true, dwellTimeMs = 45000 }
+scheduler:_handleDeparture()
+scheduler:_handleReset()
+assertEqual(scheduler.outOfServiceDueAt, nil, "reset must cancel out-of-service dwell")
+assertEqual(scheduler:_dispatchDepartureIfDue(445000), false, "reset dwell must not dispatch")
+
+scheduler.stoppedMetadata = { hidden = true, dwellTimeMs = 45000 }
+scheduler:_handleDeparture()
+scheduler:_handleApproach()
+assertEqual(scheduler.outOfServiceDueAt, nil, "new approach must cancel previous out-of-service dwell")
+assertEqual(scheduler:_dispatchDepartureIfDue(445000), false, "old dwell must not clear new approach")
+
+fakeNow = 500000
+scheduler.stoppedMetadata = { hidden = true, dwellTimeMs = 0 }
+scheduler:_handleDeparture()
+assertEqual(scheduler:_dispatchDepartureIfDue(fakeNow), true, "zero dwell must complete immediately")
+assertEqual(trackState:get(), "IDLE", "zero dwell must return to IDLE")
+
+config.TIMEOUT_TIMING = 8
+scheduler.stoppedMetadata = { terminating = true }
+scheduler:_handleDeparture()
+assertEqual(scheduler.outOfServiceDueAt, 508000, "missing dwell must use configured fallback")
+config.TIMEOUT_TIMING = 0
+
 print("departure scheduler tests passed")
