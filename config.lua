@@ -56,6 +56,10 @@ return {
 
             -- Optional direct override. When set, stationName/trackNumber are ignored.
             platformIdHex = "",
+
+            -- Route hidden-map cache lifetime. Metadata lookups reuse the
+            -- stations-and-routes response within this window.
+            routeMapTtlMs = 30000,
         },
     },
 
