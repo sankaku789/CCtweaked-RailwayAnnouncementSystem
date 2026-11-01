@@ -90,7 +90,7 @@ adapter = {
         dimension = 0,
         stationName = "Tomakomai",
         platformIdHex = "",
-        routeMapTtlMs = 30000,
+        routeMapTtlMs = 300000,
     },
 },
 ```

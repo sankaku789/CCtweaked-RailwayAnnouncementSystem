@@ -1,7 +1,7 @@
 local MtrAdapter = {}
 MtrAdapter.__index = MtrAdapter
 
-local DEFAULT_ROUTE_MAP_TTL_MS = 30000
+local DEFAULT_ROUTE_MAP_TTL_MS = 5 * 60 * 1000
 
 -- function: Return the current UTC epoch time in milliseconds.
 local function now()

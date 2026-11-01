@@ -112,4 +112,7 @@ assert(fresh:_isHiddenRoute("not-a-route-id") == false)
 assert(fresh:_isHiddenRoute("12x") == false)
 assert(stationRequestCount() == 0)
 
+-- The default TTL must outlive the default 60s next-train interval.
+assert(MtrAdapter.new({ baseUrl = "http://mtr.test" }).routeMapTtlMs == 300000)
+
 print("mtr route cache tests passed")

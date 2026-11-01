@@ -58,8 +58,10 @@ return {
             platformIdHex = "",
 
             -- Route hidden-map cache lifetime. Metadata lookups reuse the
-            -- stations-and-routes response within this window.
-            routeMapTtlMs = 30000,
+            -- stations-and-routes response within this window. Keep this above
+            -- announcement.periodic.nextTrain.intervalMs (default 60s), otherwise
+            -- every next-train announcement refetches the whole route map.
+            routeMapTtlMs = 300000,
         },
     },
 
