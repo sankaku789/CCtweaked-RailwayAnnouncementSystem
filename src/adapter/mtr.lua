@@ -1,6 +1,13 @@
 local MtrAdapter = {}
 MtrAdapter.__index = MtrAdapter
 
+local DEFAULT_ROUTE_MAP_TTL_MS = 5 * 60 * 1000
+
+-- function: Return the current UTC epoch time in milliseconds.
+local function now()
+    return os.epoch("utc")
+end
+
 -- function: Trim leading and trailing ASCII whitespace.
 local function trim(value)
     return value:match("^%s*(.-)%s*$")
@@ -241,6 +248,10 @@ end
 function MtrAdapter.new(options)
     options = options or {}
     local cfg = options.mtr or options
+    local routeMapTtlMs = tonumber(cfg.routeMapTtlMs)
+    if not routeMapTtlMs or routeMapTtlMs <= 0 then
+        routeMapTtlMs = DEFAULT_ROUTE_MAP_TTL_MS
+    end
 
     return setmetatable({
         baseUrl = normalizeBaseUrl(cfg.baseUrl),
@@ -248,6 +259,9 @@ function MtrAdapter.new(options)
         platformIdHex = type(cfg.platformIdHex) == "string" and trim(cfg.platformIdHex) or "",
         stationName = type(cfg.stationName) == "string" and trim(cfg.stationName) or "",
         stationIdHex = nil,
+        routeMapTtlMs = routeMapTtlMs,
+        routeMap = nil,
+        routeMapExpiresAt = nil,
     }, MtrAdapter)
 end
 
@@ -486,6 +500,36 @@ function MtrAdapter:_requestArrival(context)
     return nil
 end
 
+-- function: Fetch and flatten the route hidden map from stations-and-routes.
+function MtrAdapter:_loadRouteMap()
+    local data = self:_requestMap("stations-and-routes", nil, false)
+    local routes = type(data) == "table" and data.routes or nil
+    if type(routes) ~= "table" then
+        error("MTR stations-and-routes response does not contain routes")
+    end
+
+    local routeMap = {}
+    for _, route in ipairs(routes) do
+        if type(route) == "table" and type(route.id) == "string" then
+            routeMap[route.id:upper()] = route.hidden == true
+        end
+    end
+
+    self.routeMap = routeMap
+    self.routeMapExpiresAt = now() + self.routeMapTtlMs
+end
+
+-- function: Return the cached route hidden map, refreshing it after the TTL.
+function MtrAdapter:_getRouteMap()
+    if self.routeMap and self.routeMapExpiresAt and now() < self.routeMapExpiresAt then
+        return self.routeMap
+    end
+
+    -- CC:Tweaked HTTP requests yield, so concurrent coroutines may both refresh here.
+    self:_loadRouteMap()
+    return self.routeMap
+end
+
 -- function: Resolve hidden status from the route map, whose IDs use unsigned hex strings.
 function MtrAdapter:_isHiddenRoute(routeId)
     local hex = routeIdHex(routeId)
@@ -493,20 +537,7 @@ function MtrAdapter:_isHiddenRoute(routeId)
         return false
     end
 
-    local data = self:_requestMap("stations-and-routes", nil, false)
-    local routes = type(data) == "table" and data.routes or nil
-    if type(routes) ~= "table" then
-        error("MTR stations-and-routes response does not contain routes")
-    end
-
-    for _, route in ipairs(routes) do
-        if type(route) == "table" and type(route.id) == "string"
-            and route.id:upper() == hex
-        then
-            return route.hidden == true
-        end
-    end
-    return false
+    return self:_getRouteMap()[hex] == true
 end
 
 -- function: Return normalized train metadata and terminating/hidden status for the next MTR arrival.

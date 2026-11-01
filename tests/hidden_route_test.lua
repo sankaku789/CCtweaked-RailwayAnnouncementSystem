@@ -1,5 +1,10 @@
 package.path = "./src/?.lua;" .. package.path
 
+local nowMs = 0
+os.epoch = function()
+    return nowMs
+end
+
 local MtrAdapter = require("adapter.mtr")
 local Composer = require("core.composer")
 

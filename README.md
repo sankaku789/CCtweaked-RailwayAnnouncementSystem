@@ -90,11 +90,14 @@ adapter = {
         dimension = 0,
         stationName = "Tomakomai",
         platformIdHex = "",
+        routeMapTtlMs = 300000,
     },
 },
 ```
 
 `stationName` とトップレベルの `trackNumber` でホームを特定します。`platformIdHex` を設定した場合は直接指定が優先されます。
+
+`routeMapTtlMs` は路線の非表示（`hidden`）判定に使う `stations-and-routes` のキャッシュ寿命です。列車情報（arrivals）は毎回取得します。
 
 ArrivalResponseから主に以下を使います。
 
