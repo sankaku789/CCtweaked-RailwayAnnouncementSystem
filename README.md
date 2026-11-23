@@ -471,12 +471,12 @@ slotが未定義の場合は何も挿入しません。slot内では通常のDSL
 3   departure
 2   approach
 2   passing
-1   stopped_train
+0   stopped_train
 0   next_train
 -1  guidance_bell
 ```
 
-`queue.preemptPriority` の既定値は `2` です。高priority requestは低priorityの再生を中断し、`preemptPriority` 以上では低priorityの待機queueも整理します。
+`queue.preemptPriority` の既定値は `2` です。高priority requestは低priorityの再生を中断し、`preemptPriority` 以上では低priorityの待機queueも整理します。同一priority同士は割り込まず先着順で再生されます。
 
 ## コード規約
 

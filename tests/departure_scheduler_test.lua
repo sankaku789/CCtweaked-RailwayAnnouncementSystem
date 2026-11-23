@@ -120,7 +120,7 @@ local config = {
             approach = 2,
             passing = 2,
             departure = 3,
-            stopped_train = 1,
+            stopped_train = 0,
             next_train = 0,
         },
         ttlMs = {
