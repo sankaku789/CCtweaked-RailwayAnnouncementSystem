@@ -60,3 +60,7 @@ jobs:
       - name: Test PCM streaming
         run: |
           lua5.2 tests/player_pcm_stream_test.lua
+
+      - name: Test speaker reconnect and isolation
+        run: |
+          lua5.2 tests/speakers_reconnect_test.lua
