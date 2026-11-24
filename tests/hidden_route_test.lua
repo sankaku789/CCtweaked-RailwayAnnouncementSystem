@@ -71,4 +71,22 @@ arrival.routeId = "-5902564984660562616"
 local terminating = adapter:getMetadata({})
 assert(terminating.terminating == true and terminating.hidden == false)
 
+-- An earlier next-train announcement must not retain the old route at approach.
+local Scheduler = require("core.client.scheduler")
+local Provider = require("metadata.provider")
+local Cache = require("metadata.cache")
+local scheduler = setmetatable({
+    config = { trackNumber = 1 },
+    metadataProvider = Provider.new(adapter, Cache.new(30000)),
+}, { __index = Scheduler })
+arrival.isTerminating = false
+assert(scheduler:_metadataFor({ type = "next_train", track = 1 }).hidden == false)
+nowMs = 5000
+arrival.routeId = "-8442318287410092952"
+local request = { type = "approach", track = 1 }
+local approachMetadata = scheduler:_metadataFor(request)
+assert(composer:compose(request, approachMetadata)[1] == "out_of_service",
+    "approach must use the new hidden route even within the metadata TTL")
+assert(scheduler:_metadataFor({ type = "stopped_train", track = 1 }) == approachMetadata)
+
 print("hidden route tests passed")

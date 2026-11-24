@@ -491,6 +491,8 @@ function Scheduler:_metadataFor(request)
     end
 
     if request.type == "approach" then
+        -- The train may have gone out of service since the next-train announcement.
+        self:_invalidateMetadata()
         local metadata = self.metadataProvider:get(request)
         if metadata then
             self.stoppedMetadata = metadata
